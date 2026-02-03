@@ -33,7 +33,7 @@ enum ScanState: Equatable {
 }
 
 /// Main view model for scanning operations
-/// Uses TurboScannerService for ultra-fast scanning with getattrlistbulk
+/// Uses UltraScannerService (BSD APIs) for maximum performance with fallback to TurboScanner
 @MainActor
 @Observable
 final class ScanViewModel {
@@ -56,10 +56,13 @@ final class ScanViewModel {
     
     // MARK: - Services
     
-    /// Ultra-fast scanner using getattrlistbulk and fts
+    /// Ultra-fast scanner using BSD APIs (getattrlistbulk + fts) - PRIMARY
+    private let ultraScanner = UltraScannerService()
+    
+    /// High-performance scanner using FileManager - FALLBACK
     private let turboScanner = TurboScannerService()
     
-    /// Fallback to standard scanner if needed
+    /// Standard scanner - SECONDARY FALLBACK
     private let standardScanner = ScannerService()
     
     /// APFS service for clone detection and snapshots
@@ -85,7 +88,7 @@ final class ScanViewModel {
     // MARK: - Public Methods
     
     /// Start a scan of the home directory or specified directory
-    /// Uses TurboScanner for 100-1000x faster scanning
+    /// Uses UltraScanner (BSD APIs) for maximum performance with automatic fallback
     func startScan(directory: URL? = nil) async {
         let scanDirectory = directory ?? URL(fileURLWithPath: NSHomeDirectory())
         
@@ -110,8 +113,22 @@ final class ScanViewModel {
         
         let startTime = CFAbsoluteTimeGetCurrent()
         
-        // Use TurboScanner for maximum performance
-        for await result in await turboScanner.scan(directory: scanDirectory) {
+        // Choose scanner: UltraScanner (BSD APIs) if available, otherwise TurboScanner
+        let scanStream: AsyncStream<ScanResult>
+        let scannerName: String
+        
+        if await ultraScanner.canUseBSDAPIs(for: scanDirectory) {
+            scanStream = await ultraScanner.scan(directory: scanDirectory)
+            scannerName = "UltraScanner"
+            print("🚀 Using UltraScanner (BSD APIs) for maximum performance")
+        } else {
+            scanStream = await turboScanner.scan(directory: scanDirectory)
+            scannerName = "TurboScanner"
+            print("⚡ Using TurboScanner (FileManager) as fallback")
+        }
+        
+        // Process scan results
+        for await result in scanStream {
             switch result {
             case .batch(let files):
                 processBatch(files)
@@ -123,7 +140,7 @@ final class ScanViewModel {
                 let relativePath = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
                 scanState = .scanning(progress: estimateProgress(), currentDirectory: relativePath)
                 
-            case .directoryCompleted(_, fileCount: let count, totalSize: let size):
+            case .directoryCompleted(_, fileCount: _, totalSize: _):
                 // Update progress estimation
                 scanState = .scanning(progress: estimateProgress(), currentDirectory: nil)
                 
@@ -133,7 +150,7 @@ final class ScanViewModel {
             case .completed(totalFiles: let files, totalSize: let size):
                 let duration = CFAbsoluteTimeGetCurrent() - startTime
                 scanState = .completed(totalFiles: files, totalSize: size, duration: duration)
-                print("✅ Scan completed: \(files) files, \(ByteFormatter.format(size)) in \(String(format: "%.2f", duration))s")
+                print("✅ \(scannerName) completed: \(files) files, \(ByteFormatter.format(size)) in \(String(format: "%.2f", duration))s")
             }
         }
     }
@@ -141,6 +158,7 @@ final class ScanViewModel {
     /// Cancel the current scan
     func cancelScan() {
         Task {
+            await ultraScanner.cancel()
             await turboScanner.cancel()
             await standardScanner.cancel()
         }

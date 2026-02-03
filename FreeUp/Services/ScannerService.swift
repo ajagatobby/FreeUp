@@ -59,11 +59,11 @@ actor ScannerService {
         .isHiddenKey
     ]
     
-    /// Batch size for streaming results to reduce UI update frequency
-    private let batchSize: Int = 100
+    /// Batch size for streaming results to reduce UI update frequency (increased for better performance)
+    private let batchSize: Int = 2000
     
-    /// Directories to skip during scanning
-    private let excludedDirectories: Set<String> = [
+    /// Directory names to skip during scanning (O(1) Set lookup)
+    private static let excludedDirNames: Set<String> = [
         ".Spotlight-V100",
         ".fseventsd",
         ".Trashes",
@@ -72,8 +72,12 @@ actor ScannerService {
         "bin",
         "sbin",
         "usr",
-        "private/var/vm",
-        "Volumes"  // Avoid scanning other mounted volumes
+        "Volumes",
+        ".git",
+        ".svn",
+        ".hg",
+        "node_modules",
+        ".npm"
     ]
     
     /// Track if scan is cancelled
@@ -132,7 +136,8 @@ actor ScannerService {
             ).filter { url in
                 let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
                 let name = url.lastPathComponent
-                return isDir && !excludedDirectories.contains(name)
+                // O(1) Set lookup for exclusion check
+                return isDir && !Self.excludedDirNames.contains(name)
             }
         } catch {
             continuation.yield(.error(.accessDenied(directory)))
@@ -143,8 +148,7 @@ actor ScannerService {
         var totalFiles = 0
         var totalSize: Int64 = 0
         
-        // Capture values for task group
-        let excludedDirs = excludedDirectories
+        // Capture batch threshold for task group
         let batchThreshold = batchSize
         
         // Parallel scan using TaskGroup
@@ -154,7 +158,6 @@ actor ScannerService {
                     return Self.scanDirectoryStatic(
                         topLevelURL,
                         continuation: continuation,
-                        excludedDirs: excludedDirs,
                         batchThreshold: batchThreshold
                     )
                 }
@@ -192,13 +195,13 @@ actor ScannerService {
     private static func scanDirectoryStatic(
         _ directory: URL,
         continuation: AsyncStream<ScanResult>.Continuation,
-        excludedDirs: Set<String>,
         batchThreshold: Int
     ) -> ([ScannedFileInfo], Int, Int64) {
         continuation.yield(.directoryStarted(directory))
         
         let fileManager = FileManager.default
         var batch: [ScannedFileInfo] = []
+        batch.reserveCapacity(batchThreshold)
         var fileCount = 0
         var totalSize: Int64 = 0
         
@@ -214,10 +217,14 @@ actor ScannerService {
             return (batch, fileCount, totalSize)
         }
         
+        var iterCount = 0
+        
         while let fileURL = enumerator.nextObject() as? URL {
-            // Skip excluded directories
-            let relativePath = fileURL.path.replacingOccurrences(of: directory.path, with: "")
-            if excludedDirs.contains(where: { relativePath.contains($0) }) {
+            iterCount += 1
+            
+            // O(1) Set lookup for directory exclusion - check lastPathComponent only
+            let name = fileURL.lastPathComponent
+            if Self.excludedDirNames.contains(name) {
                 enumerator.skipDescendants()
                 continue
             }
@@ -266,7 +273,7 @@ actor ScannerService {
             // Yield batch when threshold reached
             if batch.count >= batchThreshold {
                 continuation.yield(.batch(batch))
-                batch = []
+                batch.removeAll(keepingCapacity: true)
             }
         }
         
@@ -282,6 +289,7 @@ actor ScannerService {
     ) -> ([ScannedFileInfo], Int, Int64) {
         let fileManager = FileManager.default
         var batch: [ScannedFileInfo] = []
+        batch.reserveCapacity(500) // Pre-allocate for typical root directory
         var fileCount = 0
         var totalSize: Int64 = 0
         
