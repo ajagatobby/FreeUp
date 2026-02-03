@@ -253,7 +253,8 @@ actor UltraScannerService {
                     category: category,
                     lastAccessDate: accessTime,
                     fileContentIdentifier: nil,
-                    isPurgeable: false
+                    isPurgeable: false,
+                    source: nil
                 )
                 
                 batch.append(fileInfo)
@@ -412,7 +413,8 @@ actor UltraScannerService {
                     category: category,
                     lastAccessDate: lastAccess,
                     fileContentIdentifier: Int64(fileId),
-                    isPurgeable: false
+                    isPurgeable: false,
+                    source: nil
                 )
                 
                 batch.append(fileInfo)
@@ -511,7 +513,8 @@ actor UltraScannerService {
                 category: category,
                 lastAccessDate: lastAccess,
                 fileContentIdentifier: nil,
-                isPurgeable: false
+                isPurgeable: false,
+                source: nil
             )
             
             batch.append(fileInfo)

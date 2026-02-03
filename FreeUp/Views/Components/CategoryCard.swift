@@ -83,7 +83,7 @@ struct CategoryCard: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        Text(isScanning ? "Scanning..." : "No items")
+                        Text(isScanning ? "Looking..." : "No items")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

@@ -136,7 +136,7 @@ struct PermissionsView: View {
                         .font(.title3)
                         .fontWeight(.semibold)
                     
-                    Text("FreeUp can now scan your entire disk to find reclaimable storage.")
+                    Text("FreeUp can now access protected folders to find all reclaimable storage.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -180,11 +180,11 @@ struct PermissionsView: View {
     private var descriptionText: String {
         switch fdaStatus {
         case .granted:
-            return "FreeUp has permission to scan all files on your disk."
+            return "FreeUp can access cache, logs, and system folders to find junk files."
         case .denied:
-            return "FreeUp needs Full Disk Access to scan protected directories like Library and Application Support."
+            return "FreeUp needs Full Disk Access to scan protected folders like Library and Application Support."
         case .notDetermined:
-            return "Grant Full Disk Access to allow FreeUp to find all reclaimable storage on your Mac."
+            return "Grant Full Disk Access to let FreeUp scan common junk locations on your Mac."
         case .restricted:
             return "Full Disk Access is restricted on this Mac. Contact your administrator."
         }

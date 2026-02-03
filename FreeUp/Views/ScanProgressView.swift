@@ -44,14 +44,18 @@ struct ScanProgressView: View {
             // Status text
             VStack(spacing: 8) {
                 if case .scanning(_, let currentDir) = state {
-                    Text("Scanning...")
+                    Text("Smart Scan")
                         .font(.title2)
                         .fontWeight(.semibold)
+                    
+                    Text("Finding junk files...")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                     
                     if let dir = currentDir {
                         Text(dir)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -133,7 +137,7 @@ struct InlineScanProgress: View {
                 ProgressView()
                     .scaleEffect(0.7)
                 
-                Text("Scanning \(filesScanned) files...")
+                Text("Found \(filesScanned) files...")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

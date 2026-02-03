@@ -373,7 +373,8 @@ actor SmartScannerService {
                     category: target.category,
                     lastAccessDate: nil, // Skip for speed
                     fileContentIdentifier: nil,
-                    isPurgeable: false
+                    isPurgeable: false,
+                    source: target.description
                 )
                 
                 batch.append(fileInfo)
@@ -446,7 +447,8 @@ actor SmartScannerService {
                 category: target.category,
                 lastAccessDate: nil,
                 fileContentIdentifier: nil,
-                isPurgeable: false
+                isPurgeable: false,
+                source: target.description
             )
             
             batch.append(fileInfo)

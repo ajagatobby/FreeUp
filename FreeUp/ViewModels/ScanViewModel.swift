@@ -180,6 +180,23 @@ final class ScanViewModel {
         return scannedFiles[category] ?? []
     }
     
+    /// Get sub-category stats for a category (grouped by source)
+    func subCategoryStats(for category: FileCategory) -> [(source: String, count: Int, totalSize: Int64)] {
+        let files = scannedFiles[category] ?? []
+        var groups: [String: (count: Int, size: Int64)] = [:]
+        
+        for file in files {
+            let source = file.source ?? "Other"
+            var current = groups[source] ?? (0, 0)
+            current.count += 1
+            current.size += file.allocatedSize
+            groups[source] = current
+        }
+        
+        return groups.map { (source: $0.key, count: $0.value.count, totalSize: $0.value.size) }
+            .sorted { $0.totalSize > $1.totalSize }
+    }
+    
     /// Check permissions status
     func checkPermissions() {
         fullDiskAccessStatus = permissionService.checkFullDiskAccess()

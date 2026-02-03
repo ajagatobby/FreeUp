@@ -232,7 +232,8 @@ actor TurboScannerService {
                 category: category,
                 lastAccessDate: lastAccess,
                 fileContentIdentifier: nil,
-                isPurgeable: false
+                isPurgeable: false,
+                source: nil
             )
             
             batch.append(fileInfo)
@@ -308,7 +309,8 @@ actor TurboScannerService {
                 category: category,
                 lastAccessDate: lastAccess,
                 fileContentIdentifier: nil,
-                isPurgeable: false
+                isPurgeable: false,
+                source: nil
             )
             
             batch.append(fileInfo)

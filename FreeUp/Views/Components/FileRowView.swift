@@ -214,7 +214,8 @@ import UniformTypeIdentifiers
                 category: .videos,
                 lastAccessDate: Date().addingTimeInterval(-86400 * 30),
                 fileContentIdentifier: nil,
-                isPurgeable: false
+                isPurgeable: false,
+                source: nil
             ),
             isSelected: true,
             isClone: false,
@@ -232,7 +233,8 @@ import UniformTypeIdentifiers
                 category: .cache,
                 lastAccessDate: Date().addingTimeInterval(-86400 * 400),
                 fileContentIdentifier: 12345,
-                isPurgeable: true
+                isPurgeable: true,
+                source: "Safari Cache"
             ),
             isSelected: false,
             isClone: true,

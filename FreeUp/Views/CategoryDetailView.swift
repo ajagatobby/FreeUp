@@ -18,6 +18,56 @@ struct CategoryDetailView: View {
     @State private var sortOrder: SortOrder = .sizeDescending
     @State private var searchText = ""
     @State private var showCloneWarning = false
+    @State private var collapsedSections: Set<String> = []
+    
+    /// Group files by source (sub-category)
+    private var groupedFiles: [(source: String, files: [ScannedFileInfo], totalSize: Int64)] {
+        var filtered = files
+        
+        // Apply search filter
+        if !searchText.isEmpty {
+            filtered = filtered.filter {
+                $0.fileName.localizedCaseInsensitiveContains(searchText) ||
+                $0.parentPath.localizedCaseInsensitiveContains(searchText) ||
+                ($0.source?.localizedCaseInsensitiveContains(searchText) ?? false)
+            }
+        }
+        
+        // Group by source
+        var groups: [String: [ScannedFileInfo]] = [:]
+        for file in filtered {
+            let source = file.source ?? "Other"
+            groups[source, default: []].append(file)
+        }
+        
+        // Sort files within each group
+        let sortedGroups = groups.mapValues { files -> [ScannedFileInfo] in
+            switch sortOrder {
+            case .sizeDescending:
+                return files.sorted { $0.allocatedSize > $1.allocatedSize }
+            case .sizeAscending:
+                return files.sorted { $0.allocatedSize < $1.allocatedSize }
+            case .nameAscending:
+                return files.sorted { $0.fileName.localizedCompare($1.fileName) == .orderedAscending }
+            case .nameDescending:
+                return files.sorted { $0.fileName.localizedCompare($1.fileName) == .orderedDescending }
+            case .dateOldest:
+                return files.sorted { ($0.lastAccessDate ?? .distantPast) < ($1.lastAccessDate ?? .distantPast) }
+            case .dateNewest:
+                return files.sorted { ($0.lastAccessDate ?? .distantPast) > ($1.lastAccessDate ?? .distantPast) }
+            }
+        }
+        
+        // Convert to array and sort groups by total size (largest first)
+        return sortedGroups.map { (source: $0.key, files: $0.value, totalSize: $0.value.reduce(0) { $0 + $1.allocatedSize }) }
+            .sorted { $0.totalSize > $1.totalSize }
+    }
+    
+    /// Check if we should show grouped view (has multiple sources)
+    private var hasMultipleSources: Bool {
+        let sources = Set(files.compactMap { $0.source })
+        return sources.count > 1
+    }
     
     private var sortedFiles: [ScannedFileInfo] {
         var filtered = files
@@ -100,34 +150,49 @@ struct CategoryDetailView: View {
                     systemImage: searchText.isEmpty ? "folder" : "magnifyingglass",
                     description: Text(searchText.isEmpty ? "No files found in this category" : "Try a different search term")
                 )
-            } else {
+            } else if hasMultipleSources {
+                // Grouped view with sub-categories
                 List {
-                    ForEach(sortedFiles, id: \.url) { file in
-                        let id = generateId(for: file)
-                        let isSelected = viewModel.selectedItems.contains(id)
-                        let isClone = file.fileContentIdentifier != nil
-                        
-                        FileRowView(
-                            file: file,
-                            isSelected: isSelected,
-                            isClone: isClone,
-                            onToggleSelection: {
-                                if viewModel.selectedItems.contains(id) {
-                                    viewModel.selectedItems.remove(id)
-                                } else {
-                                    viewModel.selectedItems.insert(id)
-                                    if isClone {
-                                        showCloneWarning = true
+                    ForEach(groupedFiles, id: \.source) { group in
+                        Section {
+                            if !collapsedSections.contains(group.source) {
+                                ForEach(group.files, id: \.url) { file in
+                                    fileRow(for: file)
+                                }
+                            }
+                        } header: {
+                            SourceSectionHeader(
+                                source: group.source,
+                                fileCount: group.files.count,
+                                totalSize: group.totalSize,
+                                isCollapsed: collapsedSections.contains(group.source),
+                                color: categoryColor,
+                                onToggle: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        if collapsedSections.contains(group.source) {
+                                            collapsedSections.remove(group.source)
+                                        } else {
+                                            collapsedSections.insert(group.source)
+                                        }
+                                    }
+                                },
+                                onSelectAll: {
+                                    for file in group.files {
+                                        let id = generateId(for: file)
+                                        viewModel.selectedItems.insert(id)
                                     }
                                 }
-                            },
-                            onRevealInFinder: {
-                                revealInFinder(file.url)
-                            }
-                        )
-                        .equatable()
-                        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
-                        .listRowSeparator(.hidden)
+                            )
+                        }
+                    }
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+            } else {
+                // Flat list for single source
+                List {
+                    ForEach(sortedFiles, id: \.url) { file in
+                        fileRow(for: file)
                     }
                 }
                 .listStyle(.plain)
@@ -232,6 +297,35 @@ struct CategoryDetailView: View {
         }
     }
     
+    @ViewBuilder
+    private func fileRow(for file: ScannedFileInfo) -> some View {
+        let id = generateId(for: file)
+        let isSelected = viewModel.selectedItems.contains(id)
+        let isClone = file.fileContentIdentifier != nil
+        
+        FileRowView(
+            file: file,
+            isSelected: isSelected,
+            isClone: isClone,
+            onToggleSelection: {
+                if viewModel.selectedItems.contains(id) {
+                    viewModel.selectedItems.remove(id)
+                } else {
+                    viewModel.selectedItems.insert(id)
+                    if isClone {
+                        showCloneWarning = true
+                    }
+                }
+            },
+            onRevealInFinder: {
+                revealInFinder(file.url)
+            }
+        )
+        .equatable()
+        .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+        .listRowSeparator(.hidden)
+    }
+    
     private func generateId(for file: ScannedFileInfo) -> UUID {
         // Generate consistent UUID from file URL path
         let hash = file.url.path.hashValue
@@ -309,6 +403,59 @@ struct CategoryHeader: View {
     }
 }
 
+// MARK: - Source Section Header
+
+struct SourceSectionHeader: View {
+    let source: String
+    let fileCount: Int
+    let totalSize: Int64
+    let isCollapsed: Bool
+    let color: Color
+    let onToggle: () -> Void
+    let onSelectAll: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onToggle) {
+                HStack(spacing: 8) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+                    
+                    Text(source)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+            }
+            .buttonStyle(.plain)
+            
+            Spacer()
+            
+            Text("\(fileCount) files")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            Text(ByteFormatter.format(totalSize))
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(color)
+            
+            Button {
+                onSelectAll()
+            } label: {
+                Image(systemName: "checkmark.circle")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Select all in \(source)")
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+    }
+}
+
 // MARK: - Selection Action Bar
 
 struct SelectionActionBar: View {
@@ -344,7 +491,7 @@ struct SelectionActionBar: View {
     }
 }
 
-#Preview {
+#Preview("Videos - Flat") {
     NavigationStack {
         CategoryDetailView(
             category: .videos,
@@ -357,7 +504,8 @@ struct SelectionActionBar: View {
                     category: .videos,
                     lastAccessDate: Date().addingTimeInterval(-86400 * 30),
                     fileContentIdentifier: nil,
-                    isPurgeable: false
+                    isPurgeable: false,
+                    source: nil
                 ),
                 ScannedFileInfo(
                     url: URL(fileURLWithPath: "/Users/test/Movies/video2.mov"),
@@ -367,7 +515,74 @@ struct SelectionActionBar: View {
                     category: .videos,
                     lastAccessDate: Date().addingTimeInterval(-86400 * 60),
                     fileContentIdentifier: 12345,
-                    isPurgeable: false
+                    isPurgeable: false,
+                    source: nil
+                )
+            ],
+            viewModel: ScanViewModel()
+        )
+    }
+}
+
+#Preview("Cache - Grouped") {
+    NavigationStack {
+        CategoryDetailView(
+            category: .cache,
+            files: [
+                ScannedFileInfo(
+                    url: URL(fileURLWithPath: "/Users/test/Library/Caches/com.apple.Safari/data1.cache"),
+                    allocatedSize: 500_000_000,
+                    fileSize: 490_000_000,
+                    contentType: .data,
+                    category: .cache,
+                    lastAccessDate: Date().addingTimeInterval(-86400 * 7),
+                    fileContentIdentifier: nil,
+                    isPurgeable: false,
+                    source: "Safari Cache"
+                ),
+                ScannedFileInfo(
+                    url: URL(fileURLWithPath: "/Users/test/Library/Caches/com.apple.Safari/data2.cache"),
+                    allocatedSize: 300_000_000,
+                    fileSize: 290_000_000,
+                    contentType: .data,
+                    category: .cache,
+                    lastAccessDate: Date().addingTimeInterval(-86400 * 14),
+                    fileContentIdentifier: nil,
+                    isPurgeable: false,
+                    source: "Safari Cache"
+                ),
+                ScannedFileInfo(
+                    url: URL(fileURLWithPath: "/Users/test/Library/Caches/Google/Chrome/cache1.db"),
+                    allocatedSize: 800_000_000,
+                    fileSize: 780_000_000,
+                    contentType: .data,
+                    category: .cache,
+                    lastAccessDate: Date().addingTimeInterval(-86400 * 3),
+                    fileContentIdentifier: nil,
+                    isPurgeable: false,
+                    source: "Chrome Cache"
+                ),
+                ScannedFileInfo(
+                    url: URL(fileURLWithPath: "/Users/test/Library/Caches/Homebrew/downloads/pkg.tar.gz"),
+                    allocatedSize: 200_000_000,
+                    fileSize: 195_000_000,
+                    contentType: .data,
+                    category: .cache,
+                    lastAccessDate: Date().addingTimeInterval(-86400 * 30),
+                    fileContentIdentifier: nil,
+                    isPurgeable: false,
+                    source: "Homebrew Cache"
+                ),
+                ScannedFileInfo(
+                    url: URL(fileURLWithPath: "/Users/test/Library/Caches/Other/misc.cache"),
+                    allocatedSize: 100_000_000,
+                    fileSize: 95_000_000,
+                    contentType: .data,
+                    category: .cache,
+                    lastAccessDate: Date().addingTimeInterval(-86400 * 60),
+                    fileContentIdentifier: nil,
+                    isPurgeable: false,
+                    source: "User Caches"
                 )
             ],
             viewModel: ScanViewModel()

@@ -28,6 +28,8 @@ struct ScannedFileInfo: Sendable, Equatable {
     let lastAccessDate: Date?
     let fileContentIdentifier: Int64?
     let isPurgeable: Bool
+    /// Source identifier for sub-categorization (e.g., "Safari Cache", "Chrome Cache")
+    let source: String?
     
     var fileName: String { url.lastPathComponent }
     var parentPath: String { url.deletingLastPathComponent().path }
@@ -263,7 +265,8 @@ actor ScannerService {
                 category: category,
                 lastAccessDate: lastAccessDate,
                 fileContentIdentifier: fileContentIdentifier,
-                isPurgeable: isPurgeable
+                isPurgeable: isPurgeable,
+                source: nil
             )
             
             batch.append(fileInfo)
@@ -330,7 +333,8 @@ actor ScannerService {
                 category: category,
                 lastAccessDate: lastAccessDate,
                 fileContentIdentifier: fileContentIdentifier,
-                isPurgeable: isPurgeable
+                isPurgeable: isPurgeable,
+                source: nil
             )
             
             batch.append(fileInfo)
