@@ -471,7 +471,6 @@ actor SmartScannerService {
     /// Ultra-fast scan that only returns category totals (no file list)
     func quickStats() async -> [FileCategory: (count: Int, size: Int64)] {
         var results: [FileCategory: (count: Int, size: Int64)] = [:]
-        let lock = NSLock()
         
         let targets = Self.getScanTargets()
         
@@ -483,13 +482,12 @@ actor SmartScannerService {
                 }
             }
             
+            // Results are processed sequentially here - no lock needed
             for await (category, count, size) in group {
-                lock.lock()
                 var current = results[category] ?? (0, 0)
                 current.count += count
                 current.size += size
                 results[category] = current
-                lock.unlock()
             }
         }
         
