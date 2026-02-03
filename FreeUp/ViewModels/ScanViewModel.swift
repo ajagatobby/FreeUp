@@ -33,7 +33,7 @@ enum ScanState: Equatable {
 }
 
 /// Main view model for scanning operations
-/// Uses UltraScannerService (BSD APIs) for maximum performance with fallback to TurboScanner
+/// Uses SmartScannerService for CleanMyMac-level speed (targets known junk locations only)
 @MainActor
 @Observable
 final class ScanViewModel {
@@ -56,7 +56,10 @@ final class ScanViewModel {
     
     // MARK: - Services
     
-    /// Ultra-fast scanner using BSD APIs (getattrlistbulk + fts) - PRIMARY
+    /// Lightning-fast scanner targeting known junk locations - PRIMARY (CleanMyMac-style)
+    private let smartScanner = SmartScannerService()
+    
+    /// Ultra-fast scanner using BSD APIs - for custom directory scans
     private let ultraScanner = UltraScannerService()
     
     /// High-performance scanner using FileManager - FALLBACK
@@ -87,11 +90,9 @@ final class ScanViewModel {
     
     // MARK: - Public Methods
     
-    /// Start a scan of the home directory or specified directory
-    /// Uses UltraScanner (BSD APIs) for maximum performance with automatic fallback
+    /// Start a scan - uses SmartScanner for system cleanup, UltraScanner for custom directories
+    /// SmartScanner achieves CleanMyMac-level speed by only scanning known junk locations
     func startScan(directory: URL? = nil) async {
-        let scanDirectory = directory ?? URL(fileURLWithPath: NSHomeDirectory())
-        
         // Reset state
         scanState = .scanning(progress: 0, currentDirectory: nil)
         totalFilesScanned = 0
@@ -113,18 +114,26 @@ final class ScanViewModel {
         
         let startTime = CFAbsoluteTimeGetCurrent()
         
-        // Choose scanner: UltraScanner (BSD APIs) if available, otherwise TurboScanner
+        // Choose scanner based on whether a specific directory is provided
         let scanStream: AsyncStream<ScanResult>
         let scannerName: String
         
-        if await ultraScanner.canUseBSDAPIs(for: scanDirectory) {
-            scanStream = await ultraScanner.scan(directory: scanDirectory)
-            scannerName = "UltraScanner"
-            print("🚀 Using UltraScanner (BSD APIs) for maximum performance")
+        if let customDirectory = directory {
+            // Custom directory scan - use UltraScanner or TurboScanner
+            if await ultraScanner.canUseBSDAPIs(for: customDirectory) {
+                scanStream = await ultraScanner.scan(directory: customDirectory)
+                scannerName = "UltraScanner"
+                print("🚀 Using UltraScanner for custom directory: \(customDirectory.path)")
+            } else {
+                scanStream = await turboScanner.scan(directory: customDirectory)
+                scannerName = "TurboScanner"
+                print("⚡ Using TurboScanner for custom directory: \(customDirectory.path)")
+            }
         } else {
-            scanStream = await turboScanner.scan(directory: scanDirectory)
-            scannerName = "TurboScanner"
-            print("⚡ Using TurboScanner (FileManager) as fallback")
+            // Default system scan - use SmartScanner for CleanMyMac-level speed
+            scanStream = await smartScanner.scan()
+            scannerName = "SmartScanner"
+            print("⚡ Using SmartScanner (targeting known junk locations)")
         }
         
         // Process scan results
@@ -158,6 +167,7 @@ final class ScanViewModel {
     /// Cancel the current scan
     func cancelScan() {
         Task {
+            await smartScanner.cancel()
             await ultraScanner.cancel()
             await turboScanner.cancel()
             await standardScanner.cancel()
