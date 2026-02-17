@@ -39,7 +39,7 @@ struct DeletionProgress: Sendable {
     }
 }
 
-/// Service for safe file deletion with Trash support
+/// Service for fast file deletion with parallel batch support
 actor DeletionService {
     /// Delete mode preference
     enum DeleteMode: Sendable {
@@ -49,113 +49,160 @@ actor DeletionService {
     
     private var isCancelled = false
     
-    /// Cancel ongoing deletion
     func cancel() {
         isCancelled = true
     }
     
-    /// Reset cancellation flag
     private func resetCancellation() {
         isCancelled = false
     }
     
-    /// Delete files with progress reporting
-    /// - Parameters:
-    ///   - files: Array of file info to delete
-    ///   - mode: Whether to move to trash or delete permanently
-    ///   - progress: Async stream for progress updates
-    /// - Returns: Result of the deletion operation
-    func deleteFiles(
-        _ files: [ScannedFileInfo],
-        mode: DeleteMode = .moveToTrash
-    ) -> AsyncStream<DeletionProgress> {
-        AsyncStream { continuation in
-            Task { [weak self] in
-                guard let self else {
-                    continuation.finish()
-                    return
-                }
-                await self.resetCancellation()
-                await self.performDeletion(files: files, mode: mode, continuation: continuation)
-            }
-        }
-    }
-    
-    /// Perform the actual deletion
-    private func performDeletion(
-        files: [ScannedFileInfo],
-        mode: DeleteMode,
-        continuation: AsyncStream<DeletionProgress>.Continuation
-    ) async {
-        let fileManager = FileManager.default
-        var bytesFreed: Int64 = 0
-        
-        for (index, file) in files.enumerated() {
-            if isCancelled {
-                continuation.finish()
-                return
-            }
-            
-            do {
-                switch mode {
-                case .moveToTrash:
-                    var resultURL: NSURL?
-                    try fileManager.trashItem(at: file.url, resultingItemURL: &resultURL)
-                    
-                case .permanent:
-                    try fileManager.removeItem(at: file.url)
-                }
-                
-                bytesFreed += file.allocatedSize
-                
-            } catch {
-                // Continue with next file on error
-                print("Failed to delete \(file.url): \(error)")
-            }
-            
-            continuation.yield(DeletionProgress(
-                current: index + 1,
-                total: files.count,
-                currentFile: file.url.lastPathComponent,
-                bytesFreed: bytesFreed
-            ))
-        }
-        
-        continuation.finish()
-    }
-    
-    /// Delete files synchronously with result
-    func deleteFilesSync(
+    /// Fast batch deletion — runs file I/O in parallel chunks off the actor
+    func deleteFilesFast(
         _ files: [ScannedFileInfo],
         mode: DeleteMode = .moveToTrash
     ) async -> DeletionResult {
-        let fileManager = FileManager.default
+        guard !files.isEmpty else {
+            return DeletionResult(successCount: 0, failureCount: 0, freedSpace: 0, errors: [])
+        }
+        
+        isCancelled = false
+        
+        switch mode {
+        case .moveToTrash:
+            return await trashFilesBatch(files)
+        case .permanent:
+            return await deleteFilesBatchParallel(files)
+        }
+    }
+    
+    // MARK: - Batch Trash via NSWorkspace.recycle (fast — Finder batches internally)
+    
+    /// Use NSWorkspace.recycle to trash files in one Finder call
+    private func trashFilesBatch(_ files: [ScannedFileInfo]) async -> DeletionResult {
+        let urls = files.map(\.url)
+        
+        // NSWorkspace.recycle handles batching internally and is MUCH faster than
+        // individual trashItem calls for large numbers of files
+        // Process in chunks of 500 to avoid overwhelming Finder and to allow cancellation
+        let chunkSize = 500
+        var totalSuccess = 0
+        var totalFailure = 0
+        var totalFreed: Int64 = 0
+        var allErrors: [DeletionError] = []
+        
+        for chunkStart in stride(from: 0, to: urls.count, by: chunkSize) {
+            if isCancelled { break }
+            
+            let chunkEnd = min(chunkStart + chunkSize, urls.count)
+            let chunkURLs = Array(urls[chunkStart..<chunkEnd])
+            let chunkFiles = Array(files[chunkStart..<chunkEnd])
+            
+            let result = await recycleChunk(chunkURLs, files: chunkFiles)
+            totalSuccess += result.successCount
+            totalFailure += result.failureCount
+            totalFreed += result.freedSpace
+            allErrors.append(contentsOf: result.errors)
+        }
+        
+        return DeletionResult(
+            successCount: totalSuccess,
+            failureCount: totalFailure,
+            freedSpace: totalFreed,
+            errors: allErrors
+        )
+    }
+    
+    /// Recycle a chunk of URLs via NSWorkspace
+    private nonisolated func recycleChunk(
+        _ urls: [URL],
+        files: [ScannedFileInfo]
+    ) async -> DeletionResult {
+        await withCheckedContinuation { continuation in
+            NSWorkspace.shared.recycle(urls) { trashedURLs, error in
+                let trashedSet = Set(trashedURLs.keys.map(\.path))
+                var successCount = 0
+                var freedSpace: Int64 = 0
+                var errors: [DeletionError] = []
+                
+                for file in files {
+                    if trashedSet.contains(file.url.path) {
+                        successCount += 1
+                        freedSpace += file.allocatedSize
+                    } else {
+                        errors.append(DeletionError(
+                            url: file.url,
+                            error: error?.localizedDescription ?? "Failed to move to Trash"
+                        ))
+                    }
+                }
+                
+                let failureCount = files.count - successCount
+                continuation.resume(returning: DeletionResult(
+                    successCount: successCount,
+                    failureCount: failureCount,
+                    freedSpace: freedSpace,
+                    errors: errors
+                ))
+            }
+        }
+    }
+    
+    // MARK: - Parallel Permanent Deletion
+    
+    /// Delete files permanently using parallel TaskGroup
+    private func deleteFilesBatchParallel(_ files: [ScannedFileInfo]) async -> DeletionResult {
+        let maxConcurrency = 16
         var successCount = 0
         var failureCount = 0
         var freedSpace: Int64 = 0
         var errors: [DeletionError] = []
         
-        for file in files {
-            if isCancelled {
-                break
-            }
+        await withTaskGroup(of: (Bool, Int64, DeletionError?).self) { group in
+            var submitted = 0
             
-            do {
-                switch mode {
-                case .moveToTrash:
-                    var resultURL: NSURL?
-                    try fileManager.trashItem(at: file.url, resultingItemURL: &resultURL)
-                    
-                case .permanent:
-                    try fileManager.removeItem(at: file.url)
+            for file in files {
+                if isCancelled { break }
+                
+                // Limit concurrency
+                if submitted >= maxConcurrency {
+                    if let result = await group.next() {
+                        if result.0 {
+                            successCount += 1
+                            freedSpace += result.1
+                        } else {
+                            failureCount += 1
+                            if let err = result.2 {
+                                errors.append(err)
+                            }
+                        }
+                    }
                 }
                 
-                successCount += 1
-                freedSpace += file.allocatedSize
-                
-            } catch {
-                failureCount += 1
-                errors.append(DeletionError(url: file.url, error: error.localizedDescription))
+                let fileURL = file.url
+                let fileSize = file.allocatedSize
+                group.addTask {
+                    do {
+                        try FileManager.default.removeItem(at: fileURL)
+                        return (true, fileSize, nil)
+                    } catch {
+                        return (false, Int64(0), DeletionError(url: fileURL, error: error.localizedDescription))
+                    }
+                }
+                submitted += 1
+            }
+            
+            // Drain remaining
+            for await result in group {
+                if result.0 {
+                    successCount += 1
+                    freedSpace += result.1
+                } else {
+                    failureCount += 1
+                    if let err = result.2 {
+                        errors.append(err)
+                    }
+                }
             }
         }
         
@@ -167,8 +214,10 @@ actor DeletionService {
         )
     }
     
+    // MARK: - Utilities
+    
     /// Empty the Trash
-    func emptyTrash() async -> Bool {
+    nonisolated func emptyTrash() async -> Bool {
         let script = NSAppleScript(source: "tell application \"Finder\" to empty trash")
         var error: NSDictionary?
         script?.executeAndReturnError(&error)
@@ -181,11 +230,9 @@ actor DeletionService {
         guard let trashURL = fileManager.urls(for: .trashDirectory, in: .userDomainMask).first else {
             return 0
         }
-        
         return calculateDirectorySize(trashURL)
     }
     
-    /// Calculate directory size recursively
     private func calculateDirectorySize(_ url: URL) -> Int64 {
         let fileManager = FileManager.default
         var totalSize: Int64 = 0
@@ -211,8 +258,6 @@ actor DeletionService {
     }
     
     /// Thin local Time Machine snapshots
-    /// - Parameter urgentGB: Space needed in GB (triggers more aggressive thinning)
-    /// - Returns: Success status and message
     func thinLocalSnapshots(urgentGB: Int = 10) async -> (success: Bool, message: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tmutil")
@@ -241,15 +286,13 @@ actor DeletionService {
         }
     }
     
-    /// Purge purgeable space (triggers system cleanup)
+    /// Purge purgeable space
     func purgePurgeableSpace() async -> (success: Bool, freedBytes: Int64) {
-        // Get initial available space
         guard let initialInfo = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityKey]) else {
             return (false, 0)
         }
         let initialAvailable = Int64(initialInfo.volumeAvailableCapacity ?? 0)
         
-        // Run purge command (requires admin privileges in most cases)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/purge")
         
@@ -257,10 +300,9 @@ actor DeletionService {
             try process.run()
             process.waitUntilExit()
         } catch {
-            // purge might fail without admin, but that's ok
+            // purge might fail without admin
         }
         
-        // Check available space after
         guard let finalInfo = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityKey]) else {
             return (false, 0)
         }
@@ -291,28 +333,12 @@ final class DeletionViewModel {
         progress = nil
         result = nil
         
-        var lastProgress: DeletionProgress?
-        
-        for await update in await deletionService.deleteFiles(files, mode: mode) {
-            progress = update
-            lastProgress = update
-        }
-        
-        // Create result from final progress
-        if let final = lastProgress {
-            result = DeletionResult(
-                successCount: final.current,
-                failureCount: files.count - final.current,
-                freedSpace: final.bytesFreed,
-                errors: []
-            )
-        }
-        
+        let deletionResult = await deletionService.deleteFilesFast(files, mode: mode)
+        result = deletionResult
         isDeleting = false
         showResult = true
     }
     
-    /// Cancel deletion
     func cancel() {
         Task {
             await deletionService.cancel()
@@ -320,18 +346,15 @@ final class DeletionViewModel {
         isDeleting = false
     }
     
-    /// Dismiss result
     func dismissResult() {
         showResult = false
         result = nil
     }
     
-    /// Empty trash
     func emptyTrash() async -> Bool {
         await deletionService.emptyTrash()
     }
     
-    /// Get trash size
     func getTrashSize() async -> Int64 {
         await deletionService.getTrashSize()
     }

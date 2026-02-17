@@ -252,16 +252,24 @@ final class ScanViewModel {
     // MARK: - Deletion Methods
     
     func deleteSelectedFiles(from category: FileCategory) async {
+        guard !selectedItems.isEmpty else { return }
+        
+        // Use selectedItems Set for O(1) lookup instead of filtering entire array
         let files = scannedFiles[category] ?? []
-        let selectedFiles = files.filter { selectedItems.contains($0.id) }
+        var selectedFiles: [ScannedFileInfo] = []
+        selectedFiles.reserveCapacity(min(selectedItems.count, files.count))
+        for file in files {
+            if selectedItems.contains(file.id) {
+                selectedFiles.append(file)
+            }
+        }
         guard !selectedFiles.isEmpty else { return }
         
         isDeletingFiles = true
-        let result = await deletionService.deleteFilesSync(selectedFiles, mode: currentDeleteMode)
+        let result = await deletionService.deleteFilesFast(selectedFiles, mode: currentDeleteMode)
         
         if result.successCount > 0 {
-            removeDeletedFiles(selectedFiles, from: category)
-            rebuildSubCategoryStatsCache()
+            removeDeletedFilesFast(result.successCount == selectedFiles.count ? selectedFiles : Array(selectedFiles.prefix(result.successCount)), fromCategories: [category])
         }
         
         lastDeletionResult = result
@@ -280,14 +288,10 @@ final class ScanViewModel {
         guard !allFiles.isEmpty else { return }
         isDeletingFiles = true
         
-        let result = await deletionService.deleteFilesSync(allFiles, mode: currentDeleteMode)
+        let result = await deletionService.deleteFilesFast(allFiles, mode: currentDeleteMode)
         
         if result.successCount > 0 {
-            for category in reclaimableCategories {
-                let categoryFiles = scannedFiles[category] ?? []
-                removeDeletedFiles(categoryFiles, from: category)
-            }
-            rebuildSubCategoryStatsCache()
+            removeDeletedFilesFast(allFiles, fromCategories: reclaimableCategories)
         }
         
         lastDeletionResult = result
@@ -299,23 +303,27 @@ final class ScanViewModel {
         guard !files.isEmpty else { return }
         isDeletingFiles = true
         
-        let result = await deletionService.deleteFilesSync(files, mode: currentDeleteMode)
+        let result = await deletionService.deleteFilesFast(files, mode: currentDeleteMode)
         
         if result.successCount > 0 {
-            let deletedURLs = Set(files.map { $0.url })
+            let deletedIDs = Set(files.map(\.id))
             
             duplicateGroups = duplicateGroups.compactMap { group in
-                let remaining = group.files.filter { !deletedURLs.contains($0.url) }
+                let remaining = group.files.filter { !deletedIDs.contains($0.id) }
                 if remaining.count <= 1 { return nil }
                 return DuplicateGroup(id: group.id, hash: group.hash, fileSize: group.fileSize, files: remaining)
             }
             
             updateDuplicateStats()
             
+            // Group deleted files by category, remove all at once
+            var byCategory: [FileCategory: [ScannedFileInfo]] = [:]
             for file in files {
-                removeDeletedFiles([file], from: file.category)
+                byCategory[file.category, default: []].append(file)
             }
-            rebuildSubCategoryStatsCache()
+            for (cat, catFiles) in byCategory {
+                removeDeletedFilesFast(catFiles, fromCategories: [cat])
+            }
         }
         
         lastDeletionResult = result
@@ -633,22 +641,34 @@ final class ScanViewModel {
         return identifiers
     }
     
-    // MARK: - File Removal After Deletion
+    // MARK: - File Removal After Deletion (fast batch version)
     
-    private func removeDeletedFiles(_ deletedFiles: [ScannedFileInfo], from category: FileCategory) {
-        let deletedIDs = Set(deletedFiles.map { $0.id })
+    /// Remove deleted files from model state — single pass, single mutation per collection
+    private func removeDeletedFilesFast(_ deletedFiles: [ScannedFileInfo], fromCategories categories: [FileCategory]) {
+        let deletedIDs = Set(deletedFiles.map(\.id))
         
-        if var files = scannedFiles[category] {
+        for category in categories {
+            guard var files = scannedFiles[category] else { continue }
+            let beforeCount = files.count
             files.removeAll { deletedIDs.contains($0.id) }
-            scannedFiles[category] = files
             
-            let newSize = files.reduce(Int64(0)) { $0 + $1.allocatedSize }
-            categoryStats[category] = CategoryStats(count: files.count, totalSize: newSize)
+            if files.count != beforeCount {
+                // Compute new size in single pass
+                var newSize: Int64 = 0
+                for f in files { newSize += f.allocatedSize }
+                scannedFiles[category] = files
+                categoryStats[category] = CategoryStats(count: files.count, totalSize: newSize)
+            }
         }
         
-        for file in deletedFiles {
-            selectedItems.remove(file.id)
+        // Remove from selection — single Set mutation
+        var updatedSelection = selectedItems
+        for id in deletedIDs {
+            updatedSelection.remove(id)
         }
+        selectedItems = updatedSelection
+        
+        rebuildSubCategoryStatsCache()
     }
 }
 
