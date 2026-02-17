@@ -99,35 +99,19 @@ struct CategoryDetailView: View {
     
     private var selectedCount: Int {
         files.filter { file in
-            let id = generateId(for: file)
+            let id = viewModel.generateId(for: file)
             return viewModel.selectedItems.contains(id)
         }.count
     }
     
     private var selectedSize: Int64 {
         files.filter { file in
-            let id = generateId(for: file)
+            let id = viewModel.generateId(for: file)
             return viewModel.selectedItems.contains(id)
         }.reduce(0) { $0 + $1.allocatedSize }
     }
     
-    private var categoryColor: Color {
-        switch category.colorName {
-        case "pink": return .pink
-        case "purple": return .purple
-        case "orange": return .orange
-        case "blue": return .blue
-        case "brown": return .brown
-        case "cyan": return .cyan
-        case "yellow": return .yellow
-        case "gray": return .gray
-        case "green": return .green
-        case "red": return .red
-        case "indigo": return .indigo
-        case "mint": return .mint
-        default: return .secondary
-        }
-    }
+    private var categoryColor: Color { category.color }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -178,7 +162,7 @@ struct CategoryDetailView: View {
                                 },
                                 onSelectAll: {
                                     for file in group.files {
-                                        let id = generateId(for: file)
+                                        let id = viewModel.generateId(for: file)
                                         viewModel.selectedItems.insert(id)
                                     }
                                 }
@@ -204,14 +188,14 @@ struct CategoryDetailView: View {
                 SelectionActionBar(
                     selectedCount: selectedCount,
                     selectedSize: selectedSize,
+                    isDeleting: viewModel.isDeletingFiles,
                     onDelete: {
-                        // Delete action
+                        Task {
+                            await viewModel.deleteSelectedFiles(from: category)
+                        }
                     },
                     onDeselect: {
-                        for file in files {
-                            let id = generateId(for: file)
-                            viewModel.selectedItems.remove(id)
-                        }
+                        viewModel.deselectAllFiles(in: category)
                     }
                 )
             }
@@ -270,17 +254,9 @@ struct CategoryDetailView: View {
                 // Select all
                 Button {
                     if selectedCount == files.count {
-                        // Deselect all
-                        for file in files {
-                            let id = generateId(for: file)
-                            viewModel.selectedItems.remove(id)
-                        }
+                        viewModel.deselectAllFiles(in: category)
                     } else {
-                        // Select all
-                        for file in files {
-                            let id = generateId(for: file)
-                            viewModel.selectedItems.insert(id)
-                        }
+                        viewModel.selectAllFiles(in: category)
                     }
                 } label: {
                     Label(
@@ -299,7 +275,7 @@ struct CategoryDetailView: View {
     
     @ViewBuilder
     private func fileRow(for file: ScannedFileInfo) -> some View {
-        let id = generateId(for: file)
+        let id = viewModel.generateId(for: file)
         let isSelected = viewModel.selectedItems.contains(id)
         let isClone = file.fileContentIdentifier != nil
         
@@ -324,18 +300,6 @@ struct CategoryDetailView: View {
         .equatable()
         .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
         .listRowSeparator(.hidden)
-    }
-    
-    private func generateId(for file: ScannedFileInfo) -> UUID {
-        // Generate consistent UUID from file URL path
-        let hash = file.url.path.hashValue
-        let uuidString = String(format: "%08X-%04X-%04X-%04X-%012X",
-                               UInt32(truncatingIfNeeded: hash),
-                               UInt16(truncatingIfNeeded: hash >> 32),
-                               UInt16(truncatingIfNeeded: hash >> 48),
-                               UInt16(truncatingIfNeeded: hash >> 16),
-                               UInt64(truncatingIfNeeded: hash))
-        return UUID(uuidString: uuidString) ?? UUID()
     }
     
     private func revealInFinder(_ url: URL) {
@@ -461,6 +425,7 @@ struct SourceSectionHeader: View {
 struct SelectionActionBar: View {
     let selectedCount: Int
     let selectedSize: Int64
+    var isDeleting: Bool = false
     let onDelete: () -> Void
     let onDeselect: () -> Void
     
@@ -477,6 +442,12 @@ struct SelectionActionBar: View {
             
             Spacer()
             
+            if isDeleting {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .padding(.horizontal)
+            }
+            
             Button("Deselect", action: onDeselect)
                 .buttonStyle(.bordered)
             
@@ -485,6 +456,7 @@ struct SelectionActionBar: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
+            .disabled(isDeleting)
         }
         .padding()
         .background(.ultraThinMaterial)

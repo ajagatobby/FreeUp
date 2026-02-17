@@ -73,14 +73,10 @@ struct FreeUpApp: App {
     
     /// Main scan view model
     @State private var scanViewModel = ScanViewModel()
-    
-    /// Deletion view model
-    @State private var deletionViewModel = DeletionViewModel()
 
     var body: some Scene {
         WindowGroup {
             DashboardView(viewModel: scanViewModel)
-                .environment(deletionViewModel)
                 .frame(minWidth: 800, minHeight: 600)
         }
         .modelContainer(sharedModelContainer)
@@ -113,7 +109,13 @@ struct FreeUpApp: App {
                 Divider()
                 
                 Button("Select All") {
-                    // Select all in current category
+                    // Select all files in all categories
+                    for (category, files) in scanViewModel.scannedFiles {
+                        for file in files {
+                            let id = scanViewModel.generateId(for: file)
+                            scanViewModel.selectedItems.insert(id)
+                        }
+                    }
                 }
                 .keyboardShortcut("a", modifiers: .command)
                 
@@ -260,9 +262,14 @@ struct AboutView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
             
+            Text("Find duplicates, junk files, caches, and free up disk space.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            
             Spacer()
             
-            Text("© 2026 Your Company")
+            Text("© 2026 Mecury Labs")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }

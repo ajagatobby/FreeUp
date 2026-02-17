@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 import UniformTypeIdentifiers
 
 /// Categories for organizing scanned files based on UTI conformance and path heuristics
@@ -23,6 +24,7 @@ enum FileCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     case systemJunk = "System Junk"
     case orphanedAppData = "Orphaned App Data"
     case developerFiles = "Developer Files"
+    case duplicates = "Duplicates"
     case other = "Other"
     
     var id: String { rawValue }
@@ -42,6 +44,7 @@ enum FileCategory: String, Codable, CaseIterable, Identifiable, Sendable {
         case .systemJunk: return "trash"
         case .orphanedAppData: return "questionmark.folder"
         case .developerFiles: return "hammer"
+        case .duplicates: return "doc.on.doc"
         case .other: return "folder"
         }
     }
@@ -61,7 +64,28 @@ enum FileCategory: String, Codable, CaseIterable, Identifiable, Sendable {
         case .systemJunk: return "red"
         case .orphanedAppData: return "indigo"
         case .developerFiles: return "mint"
+        case .duplicates: return "teal"
         case .other: return "secondary"
+        }
+    }
+    
+    /// SwiftUI Color for category visualization (single source of truth)
+    var color: Color {
+        switch self {
+        case .photos: return .pink
+        case .videos: return .purple
+        case .audio: return .orange
+        case .documents: return .blue
+        case .archives: return .brown
+        case .applications: return .cyan
+        case .cache: return .yellow
+        case .logs: return .gray
+        case .downloads: return .green
+        case .systemJunk: return .red
+        case .orphanedAppData: return .indigo
+        case .developerFiles: return .mint
+        case .duplicates: return .teal
+        case .other: return .secondary
         }
     }
     
@@ -145,16 +169,17 @@ enum FileCategory: String, Codable, CaseIterable, Identifiable, Sendable {
         case .cache: return 0
         case .systemJunk: return 1
         case .logs: return 2
-        case .developerFiles: return 3
-        case .downloads: return 4
-        case .videos: return 5
-        case .photos: return 6
-        case .audio: return 7
-        case .archives: return 8
-        case .orphanedAppData: return 9
-        case .documents: return 10
-        case .applications: return 11
-        case .other: return 12
+        case .duplicates: return 3
+        case .developerFiles: return 4
+        case .downloads: return 5
+        case .videos: return 6
+        case .photos: return 7
+        case .audio: return 8
+        case .archives: return 9
+        case .orphanedAppData: return 10
+        case .documents: return 11
+        case .applications: return 12
+        case .other: return 13
         }
     }
 }

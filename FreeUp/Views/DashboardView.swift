@@ -12,10 +12,13 @@ struct DashboardView: View {
     @Bindable var viewModel: ScanViewModel
     @State private var selectedCategory: FileCategory?
     @State private var showingPermissionsSheet = false
+    @State private var showingDuplicates = false
     @State private var expandedCategories: Set<FileCategory> = [.cache] // Cache expanded by default
+    @State private var showCleanupConfirmation = false
     
     private var isScanning: Bool {
         if case .scanning = viewModel.scanState { return true }
+        if case .detectingDuplicates = viewModel.scanState { return true }
         return false
     }
     
@@ -92,6 +95,19 @@ struct DashboardView: View {
                             }
                         }
                         
+                        // Duplicate detection progress
+                        if case .detectingDuplicates(let progress) = viewModel.scanState {
+                            HStack(spacing: 12) {
+                                ProgressView(value: progress)
+                                    .progressViewStyle(.linear)
+                                
+                                Text("Finding duplicates...")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal)
+                        }
+                        
                         // Category grid
                         if sortedCategories.isEmpty && isScanning {
                             // Show placeholder during initial scan
@@ -149,7 +165,7 @@ struct DashboardView: View {
                             ReclaimableSummary(
                                 reclaimableSpace: viewModel.reclaimableSpace,
                                 onCleanup: {
-                                    // Navigate to cleanup confirmation
+                                    showCleanupConfirmation = true
                                 }
                             )
                         }
@@ -217,11 +233,35 @@ struct DashboardView: View {
                 }
             }
             .navigationDestination(item: $selectedCategory) { category in
-                CategoryDetailView(
-                    category: category,
-                    files: viewModel.files(for: category),
-                    viewModel: viewModel
-                )
+                if category == .duplicates {
+                    DuplicatesView(viewModel: viewModel)
+                } else {
+                    CategoryDetailView(
+                        category: category,
+                        files: viewModel.files(for: category),
+                        viewModel: viewModel
+                    )
+                }
+            }
+            .alert("Clean Up", isPresented: $showCleanupConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clean Up", role: .destructive) {
+                    Task {
+                        await viewModel.cleanUpReclaimableFiles()
+                    }
+                }
+            } message: {
+                Text("This will \(viewModel.currentDeleteMode == .moveToTrash ? "move to Trash" : "permanently delete") cache files, logs, and system junk to free up \(ByteFormatter.format(viewModel.reclaimableSpace)). Continue?")
+            }
+            .alert("Cleanup Complete", isPresented: Binding(
+                get: { viewModel.showDeletionResult },
+                set: { if !$0 { viewModel.dismissDeletionResult() } }
+            )) {
+                Button("OK") { viewModel.dismissDeletionResult() }
+            } message: {
+                if let result = viewModel.lastDeletionResult {
+                    Text("Freed \(ByteFormatter.format(result.freedSpace)). \(result.successCount) files removed\(result.failureCount > 0 ? ", \(result.failureCount) failed" : "").")
+                }
             }
             .sheet(isPresented: $showingPermissionsSheet) {
                 PermissionsView(
@@ -264,23 +304,7 @@ struct ExpandableCategorySection: View {
     let onToggleExpand: () -> Void
     let onCategoryTap: () -> Void
     
-    private var color: Color {
-        switch category.colorName {
-        case "pink": return .pink
-        case "purple": return .purple
-        case "orange": return .orange
-        case "blue": return .blue
-        case "brown": return .brown
-        case "cyan": return .cyan
-        case "yellow": return .yellow
-        case "gray": return .gray
-        case "green": return .green
-        case "red": return .red
-        case "indigo": return .indigo
-        case "mint": return .mint
-        default: return .secondary
-        }
-    }
+    private var color: Color { category.color }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

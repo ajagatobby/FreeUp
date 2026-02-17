@@ -16,23 +16,7 @@ struct CategoryCard: View {
     
     @State private var isHovered = false
     
-    private var color: Color {
-        switch category.colorName {
-        case "pink": return .pink
-        case "purple": return .purple
-        case "orange": return .orange
-        case "blue": return .blue
-        case "brown": return .brown
-        case "cyan": return .cyan
-        case "yellow": return .yellow
-        case "gray": return .gray
-        case "green": return .green
-        case "red": return .red
-        case "indigo": return .indigo
-        case "mint": return .mint
-        default: return .secondary
-        }
-    }
+    private var color: Color { category.color }
     
     var body: some View {
         Button(action: action) {
@@ -121,23 +105,7 @@ struct CompactCategoryCard: View {
     let stats: CategoryDisplayStats?
     let action: () -> Void
     
-    private var color: Color {
-        switch category.colorName {
-        case "pink": return .pink
-        case "purple": return .purple
-        case "orange": return .orange
-        case "blue": return .blue
-        case "brown": return .brown
-        case "cyan": return .cyan
-        case "yellow": return .yellow
-        case "gray": return .gray
-        case "green": return .green
-        case "red": return .red
-        case "indigo": return .indigo
-        case "mint": return .mint
-        default: return .secondary
-        }
-    }
+    private var color: Color { category.color }
     
     var body: some View {
         Button(action: action) {

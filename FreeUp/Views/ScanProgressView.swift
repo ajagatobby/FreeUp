@@ -59,6 +59,14 @@ struct ScanProgressView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
+                } else if case .detectingDuplicates = state {
+                    Text("Finding Duplicates")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    
+                    Text("Comparing files by content...")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
             }
             
@@ -83,6 +91,16 @@ struct ScanProgressView: View {
                         .frame(width: 200)
                     
                     Text("\(Int(progress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if case .detectingDuplicates(let progress) = state {
+                VStack(spacing: 4) {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .frame(width: 200)
+                    
+                    Text("Hashing: \(Int(progress * 100))%")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -138,6 +156,13 @@ struct InlineScanProgress: View {
                     .scaleEffect(0.7)
                 
                 Text("Found \(filesScanned) files...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if case .detectingDuplicates = state {
+                ProgressView()
+                    .scaleEffect(0.7)
+                
+                Text("Finding duplicates...")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
