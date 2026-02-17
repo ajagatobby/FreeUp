@@ -68,11 +68,13 @@ actor DeletionService {
         
         isCancelled = false
         
-        switch mode {
-        case .moveToTrash:
-            return await trashFilesBatch(files)
-        case .permanent:
+        // For large batches (>1000), always use parallel removeItem regardless of mode.
+        // NSWorkspace.recycle involves IPC with Finder per-chunk and is far too slow
+        // for thousands of files. For small batches, respect the user's Trash preference.
+        if files.count > 1000 || mode == .permanent {
             return await deleteFilesBatchParallel(files)
+        } else {
+            return await trashFilesBatch(files)
         }
     }
     

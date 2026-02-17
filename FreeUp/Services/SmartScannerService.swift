@@ -78,11 +78,10 @@ actor SmartScannerService {
         ))
         
         // ============ SYSTEM JUNK ============
-        targets.append(ScanTarget(
-            url: home.appendingPathComponent(".Trash"),
-            category: .systemJunk,
-            description: "Trash"
-        ))
+        // NOTE: ~/.Trash is intentionally NOT scanned. It contained 200k+ files
+        // on some machines, all showing as "System Junk". Deleting them tried to
+        // move-to-Trash files already in the Trash, causing Finder to hang.
+        // The app offers "Empty Trash" as a separate action instead.
         targets.append(ScanTarget(
             url: library.appendingPathComponent("Saved Application State"),
             category: .systemJunk,

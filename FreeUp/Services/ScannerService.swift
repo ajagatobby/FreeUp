@@ -116,6 +116,7 @@ actor ScannerService {
         ".Spotlight-V100",
         ".fseventsd",
         ".Trashes",
+        ".Trash",
         ".vol",
         "System",
         "bin",
