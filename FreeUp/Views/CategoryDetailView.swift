@@ -70,22 +70,15 @@ struct CategoryDetailView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
-                        .foregroundStyle(FUColors.textTertiary)
+                        .foregroundStyle(.tertiary)
                     TextField("Search files...", text: $searchText)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
-                        .foregroundStyle(FUColors.textPrimary)
+                        .foregroundStyle(.primary)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(FUColors.bgCard)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .stroke(FUColors.border, lineWidth: 1)
-                        )
-                )
+                .background(Color(.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                 sortMenu
                     .font(.system(size: 11, weight: .medium))
@@ -95,10 +88,10 @@ struct CategoryDetailView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(FUColors.bgElevated)
+            .background(Color(.controlBackgroundColor))
 
             Rectangle()
-                .fill(FUColors.border)
+                .fill(Color(.separatorColor))
                 .frame(height: 1)
 
             // Scrollable content area — fills all remaining space below the fixed header
@@ -106,10 +99,10 @@ struct CategoryDetailView: View {
                 if isLoading {
                     VStack(spacing: 12) {
                         ProgressView()
-                            .tint(FUColors.textSecondary)
+                            .tint(.secondary)
                         Text("Loading files...")
                             .font(.subheadline)
-                            .foregroundStyle(FUColors.textSecondary)
+                            .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if displayFlatFiles.isEmpty && displayGroups.isEmpty {
@@ -126,7 +119,7 @@ struct CategoryDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(FUColors.bg)
+            .background(Color(.windowBackgroundColor))
 
             // Bottom action bar
             if localSelectedCount > 0 {
@@ -146,7 +139,7 @@ struct CategoryDetailView: View {
                 )
             }
         }
-        .background(FUColors.bg)
+        .background(Color(.windowBackgroundColor))
         .alert("Clone Warning", isPresented: $showCloneWarning) {
             Button("OK") { }
         } message: {
@@ -171,7 +164,7 @@ struct CategoryDetailView: View {
                             if group.fileCount > group.previewFiles.count {
                                 Text("\(group.fileCount - group.previewFiles.count) more files...")
                                     .font(.caption)
-                                    .foregroundStyle(FUColors.textTertiary)
+                                    .foregroundStyle(.tertiary)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 8)
                             }
@@ -196,7 +189,7 @@ struct CategoryDetailView: View {
                                 selectFiles(ids: group.allFileIDs, files: group.previewFiles)
                             }
                         )
-                        .background(FUColors.bgElevated)
+                        .background(Color(.controlBackgroundColor))
                     }
                 }
             }
@@ -497,7 +490,7 @@ struct CategoryHeader: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(totalFiles) files")
                     .font(.headline)
-                    .foregroundStyle(FUColors.textPrimary)
+                    .foregroundStyle(.primary)
                 Text(ByteFormatter.format(totalSize))
                     .font(.title2)
                     .fontWeight(.bold)
@@ -510,15 +503,15 @@ struct CategoryHeader: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("\(selectedCount) selected")
                         .font(.subheadline)
-                        .foregroundStyle(FUColors.textSecondary)
+                        .foregroundStyle(.secondary)
                     Text(ByteFormatter.format(selectedSize))
                         .font(.headline)
-                        .foregroundStyle(FUColors.accent)
+                        .foregroundStyle(Color.accentColor)
                 }
             }
         }
         .padding()
-        .background(FUColors.bgElevated)
+        .background(Color(.controlBackgroundColor))
     }
 }
 
@@ -539,11 +532,11 @@ struct SourceSectionHeader: View {
                 HStack(spacing: 8) {
                     Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                         .font(.caption)
-                        .foregroundStyle(FUColors.textTertiary)
+                        .foregroundStyle(.tertiary)
                         .frame(width: 12)
                     Text(source)
                         .font(.headline)
-                        .foregroundStyle(FUColors.textPrimary)
+                        .foregroundStyle(.primary)
                 }
             }
             .buttonStyle(.plain)
@@ -552,7 +545,7 @@ struct SourceSectionHeader: View {
 
             Text("\(fileCount) files")
                 .font(.caption)
-                .foregroundStyle(FUColors.textSecondary)
+                .foregroundStyle(.secondary)
 
             Text(ByteFormatter.format(totalSize))
                 .font(.subheadline)
@@ -564,14 +557,14 @@ struct SourceSectionHeader: View {
             } label: {
                 Image(systemName: "checkmark.circle")
                     .font(.body)
-                    .foregroundStyle(FUColors.textSecondary)
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .help("Select all in \(source)")
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 4)
-        .background(FUColors.bgElevated)
+        .background(Color(.controlBackgroundColor))
     }
 }
 
@@ -589,10 +582,10 @@ struct SelectionActionBar: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(selectedCount) items selected")
                     .font(.headline)
-                    .foregroundStyle(FUColors.textPrimary)
+                    .foregroundStyle(.primary)
                 Text(ByteFormatter.format(selectedSize))
                     .font(.subheadline)
-                    .foregroundStyle(FUColors.textSecondary)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -605,7 +598,7 @@ struct SelectionActionBar: View {
 
             Button("Deselect", action: onDeselect)
                 .buttonStyle(.bordered)
-                .tint(FUColors.textSecondary)
+                .tint(.secondary)
 
             Button(action: onDelete) {
                 Label("Move to Trash", systemImage: "trash")
@@ -616,9 +609,9 @@ struct SelectionActionBar: View {
         }
         .padding()
         .overlay(alignment: .top) {
-            FUColors.border
+            Color(.separatorColor)
                 .frame(height: 1)
         }
-        .background(FUColors.bgCard)
+        .background(Color(.unemphasizedSelectedContentBackgroundColor))
     }
 }

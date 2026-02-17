@@ -7,68 +7,44 @@
 
 import SwiftUI
 
-/// Compact sidebar row for a file category — used in the left sidebar.
+/// Native-feeling sidebar row for a file category.
 struct SidebarCategoryRow: View {
     let category: FileCategory
     let stats: CategoryDisplayStats?
     let isSelected: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     private var themeColor: Color { category.themeColor }
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                // Icon
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(themeColor.opacity(isSelected ? 0.20 : 0.10))
-                    .frame(width: 30, height: 30)
-                    .overlay(
-                        Image(systemName: category.iconName)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(themeColor)
-                    )
+            HStack(spacing: 8) {
+                Image(systemName: category.iconName)
+                    .font(.system(size: 14))
+                    .foregroundStyle(isSelected ? .white : themeColor)
+                    .frame(width: 22)
 
-                // Name
                 Text(category.rawValue)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? FUColors.textPrimary : FUColors.textSecondary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(isSelected ? .white : .primary)
                     .lineLimit(1)
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 2)
 
-                // Size badge
-                if let stats {
+                if let stats, stats.totalSize > 0 {
                     Text(ByteFormatter.format(stats.totalSize))
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(isSelected ? themeColor : FUColors.textTertiary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(
-                        isSelected
-                            ? themeColor.opacity(0.10)
-                            : (isHovered ? FUColors.bgHover : Color.clear)
-                    )
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear))
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(
-                        isSelected ? themeColor.opacity(0.20) : Color.clear,
-                        lineWidth: 1
-                    )
-            )
+            .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                isHovered = hovering
-            }
-        }
     }
 }

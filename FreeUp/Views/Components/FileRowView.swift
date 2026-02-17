@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 
 // MARK: - FileRowView
 
-/// Equatable file row for optimized List rendering.
+/// Clean file row — no cards, no hover lift, just data.
 struct FileRowView: View, Equatable {
     let file: ScannedFileInfo
     let isSelected: Bool
@@ -28,224 +28,133 @@ struct FileRowView: View, Equatable {
         lhs.index == rhs.index
     }
 
-    // MARK: - Background
-
-    private var rowBackground: Color {
-        if isSelected {
-            return FUColors.accentDim
-        }
-        if isHovered {
-            return FUColors.bgHover
-        }
-        // Odd rows get a subtly darker tint for alternating stripe
-        if index.isMultiple(of: 2) {
-            return .clear
-        }
-        return FUColors.bg.opacity(0.35)
-    }
-
-    // MARK: - Body
-
     var body: some View {
-        HStack(spacing: 12) {
-            selectionCheckbox
+        HStack(spacing: 10) {
+            // Checkbox
+            Button(action: onToggleSelection) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color(.tertiaryLabelColor))
+            }
+            .buttonStyle(.plain)
+
+            // Icon
             FileIconView(contentType: file.contentType)
-            fileInfo
+
+            // Name + path
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Text(file.fileName)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if isClone {
+                        BadgeLabel(text: "Clone", color: .orange)
+                    }
+                    if file.isPurgeable {
+                        BadgeLabel(text: "Purgeable", color: .green)
+                    }
+                }
+
+                Text(file.parentPath)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+
             Spacer(minLength: 4)
-            lastAccessLabel
-            fileSizeLabel
-            contextMenuButton
+
+            // Last access
+            if let lastAccess = file.lastAccessDate {
+                Text(lastAccess, style: .relative)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 80, alignment: .trailing)
+            }
+
+            // Size
+            Text(ByteFormatter.format(file.allocatedSize))
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 75, alignment: .trailing)
+
+            // Context menu (visible on hover)
+            Menu {
+                Button("Reveal in Finder", action: onRevealInFinder)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(file.url.path, forType: .string)
+                } label: {
+                    Label("Copy Path", systemImage: "doc.on.doc")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 24)
+            .opacity(isHovered ? 1 : 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(rowBackground)
+            isSelected
+                ? Color.accentColor.opacity(0.10)
+                : (index.isMultiple(of: 2) ? Color.clear : Color(.separatorColor).opacity(0.08))
         )
         .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
-    }
-
-    // MARK: - Subviews
-
-    private var selectionCheckbox: some View {
-        Button(action: onToggleSelection) {
-            ZStack {
-                Circle()
-                    .strokeBorder(
-                        isSelected ? FUColors.accent : FUColors.textTertiary,
-                        lineWidth: 1.5
-                    )
-                    .frame(width: 20, height: 20)
-
-                if isSelected {
-                    Circle()
-                        .fill(FUColors.accent)
-                        .frame(width: 20, height: 20)
-
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(FUColors.bg)
-                }
-            }
-            .animation(.easeInOut(duration: 0.15), value: isSelected)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var fileInfo: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(file.fileName)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(FUColors.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                if isClone {
-                    CloneBadge()
-                }
-
-                if file.isPurgeable {
-                    PurgeableBadge()
-                }
-            }
-
-            Text(file.parentPath)
-                .font(.system(size: 11))
-                .foregroundStyle(FUColors.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.head)
-        }
-    }
-
-    @ViewBuilder
-    private var lastAccessLabel: some View {
-        if let lastAccess = file.lastAccessDate {
-            Text(lastAccess, style: .relative)
-                .font(.system(size: 11))
-                .foregroundStyle(FUColors.textTertiary)
-                .frame(width: 90, alignment: .trailing)
-        }
-    }
-
-    private var fileSizeLabel: some View {
-        Text(ByteFormatter.format(file.allocatedSize))
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(FUColors.textPrimary)
-            .monospacedDigit()
-            .frame(width: 80, alignment: .trailing)
-    }
-
-    private var contextMenuButton: some View {
-        Menu {
-            Button("Reveal in Finder", action: onRevealInFinder)
-
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(file.url.path, forType: .string)
-            } label: {
-                Label("Copy Path", systemImage: "doc.on.doc")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 12))
-                .foregroundStyle(FUColors.textTertiary)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .frame(width: 28)
-        .opacity(isHovered ? 1 : 0)
-        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .onHover { isHovered = $0 }
     }
 }
 
 // MARK: - FileIconView
 
-/// File icon with UTType-based SF Symbol and color tinting.
 struct FileIconView: View {
     let contentType: UTType?
 
-    private var iconConfig: (name: String, color: Color) {
-        guard let type = contentType else {
-            return ("doc", FUColors.textSecondary)
-        }
-
-        if type.conforms(to: .image) {
-            return ("photo", FUColors.photosColor)
-        }
-        if type.conforms(to: .movie) || type.conforms(to: .video) {
-            return ("film", FUColors.videosColor)
-        }
-        if type.conforms(to: .audio) {
-            return ("waveform", FUColors.audioColor)
-        }
-        if type.conforms(to: .archive) {
-            return ("archivebox", FUColors.archivesColor)
-        }
-        if type.conforms(to: .pdf) {
-            return ("doc.text", FUColors.systemJunkColor)
-        }
-        if type.conforms(to: .folder) {
-            return ("folder.fill", FUColors.downloadsColor)
-        }
-        if type.conforms(to: .application) {
-            return ("app", FUColors.accent)
-        }
-
-        return ("doc", FUColors.downloadsColor)
+    private var config: (name: String, color: Color) {
+        guard let type = contentType else { return ("doc", .secondary) }
+        if type.conforms(to: .image)       { return ("photo", .pink) }
+        if type.conforms(to: .movie) || type.conforms(to: .video) { return ("film", .purple) }
+        if type.conforms(to: .audio)       { return ("waveform", .orange) }
+        if type.conforms(to: .archive)     { return ("archivebox", .brown) }
+        if type.conforms(to: .pdf)         { return ("doc.text", .red) }
+        if type.conforms(to: .folder)      { return ("folder.fill", .blue) }
+        if type.conforms(to: .application) { return ("app", .cyan) }
+        return ("doc", .blue)
     }
 
     var body: some View {
-        let config = iconConfig
-
-        ZStack {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(config.color.opacity(0.12))
-                .frame(width: 32, height: 32)
-
-            Image(systemName: config.name)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(config.color)
-        }
+        Image(systemName: config.name)
+            .font(.system(size: 16))
+            .foregroundStyle(config.color)
+            .frame(width: 24, height: 24)
     }
 }
 
-// MARK: - CloneBadge
+// MARK: - BadgeLabel
 
-/// Badge indicating file is an APFS clone.
-struct CloneBadge: View {
+struct BadgeLabel: View {
+    let text: String
+    let color: Color
+
     var body: some View {
-        Text("Clone")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(FUColors.audioColor)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1.5)
-            .background(
-                Capsule()
-                    .fill(FUColors.audioColor.opacity(0.12))
-            )
+        Text(text)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(color.opacity(0.12), in: Capsule())
     }
 }
 
-// MARK: - PurgeableBadge
+// MARK: - Legacy compatibility aliases
 
-/// Badge indicating file is purgeable by the system.
-struct PurgeableBadge: View {
-    var body: some View {
-        Text("Purgeable")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(FUColors.developerColor)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1.5)
-            .background(
-                Capsule()
-                    .fill(FUColors.developerColor.opacity(0.12))
-            )
-    }
-}
+typealias CloneBadge = EmptyView
+typealias PurgeableBadge = EmptyView

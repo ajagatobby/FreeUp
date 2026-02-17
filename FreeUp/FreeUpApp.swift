@@ -78,12 +78,10 @@ struct FreeUpApp: App {
         WindowGroup {
             DashboardView(viewModel: scanViewModel)
                 .frame(minWidth: 800, minHeight: 600)
-                .preferredColorScheme(.dark)
-                .background(FUColors.bg)
         }
         .modelContainer(sharedModelContainer)
         .windowStyle(.automatic)
-        .windowToolbarStyle(.unified(showsTitle: false))
+        .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
             // File menu commands
             CommandGroup(replacing: .newItem) {
@@ -152,7 +150,6 @@ struct FreeUpApp: App {
         // Settings window
         Settings {
             SettingsView()
-                .preferredColorScheme(.dark)
         }
     }
 }
@@ -187,7 +184,6 @@ struct SettingsView: View {
                 }
         }
         .frame(width: 450, height: 320)
-        .background(FUColors.bg)
     }
 }
 
@@ -236,7 +232,7 @@ struct PerformanceSettingsView: View {
                 
                 Text("Larger batch sizes reduce UI updates during scanning but may feel less responsive.")
                     .font(.caption)
-                    .foregroundStyle(FUColors.textSecondary)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Scanning Performance")
             }
@@ -250,42 +246,40 @@ struct PerformanceSettingsView: View {
 struct AboutView: View {
     var body: some View {
         VStack(spacing: 20) {
-            // Gradient icon
+            // App icon
             ZStack {
                 Circle()
-                    .fill(FUColors.accentDim)
+                    .fill(Color.accentColor.opacity(0.12))
                     .frame(width: 80, height: 80)
 
                 Image(systemName: "externaldrive.badge.checkmark")
                     .font(.system(size: 32, weight: .medium))
-                    .foregroundStyle(FUColors.accent)
+                    .foregroundStyle(Color.accentColor)
             }
             
             Text("FreeUp")
                 .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(FUColors.textPrimary)
             
             Text("Version 1.0")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(FUColors.textSecondary)
+                .foregroundStyle(.secondary)
             
             Text("A high-performance macOS storage cleaner")
                 .font(.system(size: 13))
-                .foregroundStyle(FUColors.textSecondary)
+                .foregroundStyle(.secondary)
             
             Text("Find duplicates, junk files, caches, and free up disk space.")
                 .font(.system(size: 12))
-                .foregroundStyle(FUColors.textTertiary)
+                .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
             
             Spacer()
             
             Text("\u{00A9} 2026 Mecury Labs")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(FUColors.textTertiary)
+                .foregroundStyle(.tertiary)
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(FUColors.bg)
     }
 }

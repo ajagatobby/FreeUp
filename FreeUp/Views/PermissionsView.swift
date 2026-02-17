@@ -17,10 +17,10 @@ struct PermissionsView: View {
     
     private var statusColor: Color {
         switch fdaStatus {
-        case .granted: return FUColors.developerColor
-        case .denied: return FUColors.cacheColor
-        case .notDetermined: return FUColors.cacheColor.opacity(0.7)
-        case .restricted: return FUColors.danger
+        case .granted: return Color.green
+        case .denied: return Color.orange
+        case .notDetermined: return Color.orange.opacity(0.7)
+        case .restricted: return Color.red
         }
     }
     
@@ -44,7 +44,7 @@ struct PermissionsView: View {
     
     var body: some View {
         ZStack {
-            FUColors.bg
+            Color(.windowBackgroundColor)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -62,18 +62,18 @@ struct PermissionsView: View {
                     
                     Text(statusText)
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(FUColors.textPrimary)
+                        .foregroundStyle(.primary)
                     
                     Text(descriptionText)
                         .font(.system(size: 13))
-                        .foregroundStyle(FUColors.textSecondary)
+                        .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
                 .padding(.vertical, 30)
                 
                 Rectangle()
-                    .fill(FUColors.border)
+                    .fill(Color(.separatorColor))
                     .frame(height: 1)
                 
                 // Steps (only show if not granted)
@@ -82,7 +82,7 @@ struct PermissionsView: View {
                         VStack(alignment: .leading, spacing: 20) {
                             Text("How to enable Full Disk Access:")
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(FUColors.textPrimary)
+                                .foregroundStyle(.primary)
                                 .padding(.top)
                             
                             StepView(
@@ -116,20 +116,16 @@ struct PermissionsView: View {
                             // Note about app appearing
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: "info.circle")
-                                    .foregroundStyle(FUColors.downloadsColor)
+                                    .foregroundStyle(Color.blue)
                                 
                                 Text("FreeUp should appear in the list automatically. If it doesn't, click the + button to add it manually from your Applications folder.")
                                     .font(.system(size: 11))
-                                    .foregroundStyle(FUColors.textSecondary)
+                                    .foregroundStyle(.secondary)
                             }
                             .padding(14)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(FUColors.downloadsColor.opacity(0.08))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(FUColors.downloadsColor.opacity(0.15), lineWidth: 1)
-                                    )
+                                    .fill(Color.blue.opacity(0.08))
                             )
                         }
                         .padding()
@@ -142,21 +138,21 @@ struct PermissionsView: View {
                         
                         ZStack {
                             Circle()
-                                .fill(FUColors.developerColor.opacity(0.12))
+                                .fill(Color.green.opacity(0.12))
                                 .frame(width: 72, height: 72)
 
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 38))
-                                .foregroundStyle(FUColors.developerColor)
+                                .foregroundStyle(Color.green)
                         }
                         
                         Text("You're all set!")
                             .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(FUColors.textPrimary)
+                            .foregroundStyle(.primary)
                         
                         Text("FreeUp can now access protected folders to find all reclaimable storage.")
                             .font(.system(size: 13))
-                            .foregroundStyle(FUColors.textSecondary)
+                            .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 40)
                         
@@ -165,7 +161,7 @@ struct PermissionsView: View {
                 }
                 
                 Rectangle()
-                    .fill(FUColors.border)
+                    .fill(Color(.separatorColor))
                     .frame(height: 1)
                 
                 // Action buttons
@@ -186,7 +182,7 @@ struct PermissionsView: View {
                             .padding(.vertical, 9)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(FUColors.accentGradient)
+                                    .fill(Color.accentColor)
                             )
                         }
                         .buttonStyle(.plain)
@@ -209,7 +205,7 @@ struct PermissionsView: View {
                             .padding(.vertical, 9)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(FUColors.accentGradient)
+                                    .fill(Color.accentColor)
                             )
                         }
                         .buttonStyle(.plain)
@@ -219,23 +215,16 @@ struct PermissionsView: View {
                         } label: {
                             Text("Continue Without Full Access")
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(FUColors.textSecondary)
+                                .foregroundStyle(.secondary)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(FUColors.bgHover)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                .stroke(FUColors.border, lineWidth: 1)
-                                        )
-                                )
+                                .background(Color(.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 .padding(16)
-                .background(FUColors.bgElevated)
+                .background(Color(.controlBackgroundColor))
             }
         }
         .frame(width: 500, height: 600)
@@ -274,26 +263,22 @@ struct StepView: View {
         HStack(alignment: .top, spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(isActive ? FUColors.accent : FUColors.bgHover)
+                    .fill(isActive ? Color.accentColor : Color(.quaternaryLabelColor))
                     .frame(width: 32, height: 32)
-                    .overlay(
-                        Circle()
-                            .stroke(isActive ? Color.clear : FUColors.border, lineWidth: 1)
-                    )
                 
                 Text("\(number)")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(isActive ? Color.white : FUColors.textTertiary)
+                    .foregroundStyle(isActive ? Color.white : Color(.tertiaryLabelColor))
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(isActive ? FUColors.textPrimary : FUColors.textSecondary)
+                    .foregroundStyle(isActive ? .primary : .secondary)
                 
                 Text(description)
                     .font(.system(size: 12))
-                    .foregroundStyle(FUColors.textTertiary)
+                    .foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 4)
@@ -306,10 +291,10 @@ struct PermissionStatusBadge: View {
     
     private var color: Color {
         switch status {
-        case .granted: return FUColors.developerColor
-        case .denied: return FUColors.cacheColor
-        case .notDetermined: return FUColors.cacheColor.opacity(0.7)
-        case .restricted: return FUColors.danger
+        case .granted: return Color.green
+        case .denied: return Color.orange
+        case .notDetermined: return Color.orange.opacity(0.7)
+        case .restricted: return Color.red
         }
     }
     
@@ -330,7 +315,7 @@ struct PermissionStatusBadge: View {
             
             Text(text)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(FUColors.textSecondary)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)

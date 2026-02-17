@@ -7,16 +7,14 @@
 
 import SwiftUI
 
-// MARK: - Dashboard (Sidebar + Detail Split)
+// MARK: - Dashboard
 
-/// CleanMyMac-style layout: fixed left sidebar with categories, right detail pane.
 struct DashboardView: View {
     @Bindable var viewModel: ScanViewModel
     @State private var selectedCategory: FileCategory?
     @State private var showingPermissionsSheet = false
     @State private var showCleanupConfirmation = false
-
-    // MARK: - Derived state
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     private var isScanning: Bool {
         if case .scanning = viewModel.scanState { return true }
@@ -34,35 +32,23 @@ struct DashboardView: View {
 
     private var hasResults: Bool { !sortedCategories.isEmpty }
 
-    // MARK: - Body
-
     var body: some View {
-        HStack(spacing: 0) {
-            // ── Left sidebar ──
-            sidebar
-                .frame(width: 220)
-
-            // Vertical divider
-            Rectangle()
-                .fill(FUColors.border)
-                .frame(width: 1)
-
-            // ── Right detail pane ──
-            detailPane
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebarContent
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
+        } detail: {
+            detailContent
         }
-        .background(FUColors.bg)
-        .preferredColorScheme(.dark)
-        // Cleanup confirmation
+        .navigationSplitViewStyle(.balanced)
+        // Alerts
         .alert("Clean Up", isPresented: $showCleanupConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Clean Up", role: .destructive) {
                 Task { await viewModel.cleanUpReclaimableFiles() }
             }
         } message: {
-            Text("This will \(viewModel.currentDeleteMode == .moveToTrash ? "move to Trash" : "permanently delete") cache files, logs, and system junk to free up \(ByteFormatter.format(viewModel.reclaimableSpace)). Continue?")
+            Text("This will \(viewModel.currentDeleteMode == .moveToTrash ? "move to Trash" : "permanently delete") cache, logs, and junk to free \(ByteFormatter.format(viewModel.reclaimableSpace)).")
         }
-        // Deletion result
         .alert(
             viewModel.lastDeletionResult?.allSuccessful == true ? "Cleanup Complete" : "Cleanup Result",
             isPresented: Binding(
@@ -71,24 +57,17 @@ struct DashboardView: View {
             )
         ) {
             Button("OK") { viewModel.dismissDeletionResult() }
-            if viewModel.lastDeletionResult?.failureCount ?? 0 > 0 && viewModel.lastDeletionResult?.successCount == 0 {
-                Button("Open Privacy Settings") {
-                    viewModel.openFullDiskAccessSettings()
-                    viewModel.dismissDeletionResult()
-                }
-            }
         } message: {
-            if let result = viewModel.lastDeletionResult {
-                if result.successCount > 0 && result.failureCount == 0 {
-                    Text("Freed \(ByteFormatter.format(result.freedSpace)). \(result.successCount) files removed.")
-                } else if result.successCount == 0 && result.failureCount > 0 {
-                    Text("All \(result.failureCount) files failed to delete. Grant Full Disk Access in System Settings > Privacy & Security to allow FreeUp to remove protected files.")
+            if let r = viewModel.lastDeletionResult {
+                if r.successCount > 0 && r.failureCount == 0 {
+                    Text("Freed \(ByteFormatter.format(r.freedSpace)). \(r.successCount) files removed.")
+                } else if r.successCount == 0 {
+                    Text("All \(r.failureCount) files failed. Grant Full Disk Access in System Settings.")
                 } else {
-                    Text("Freed \(ByteFormatter.format(result.freedSpace)). \(result.successCount) removed, \(result.failureCount) failed (may need Full Disk Access).")
+                    Text("Freed \(ByteFormatter.format(r.freedSpace)). \(r.successCount) removed, \(r.failureCount) failed.")
                 }
             }
         }
-        // Permissions sheet
         .sheet(isPresented: $showingPermissionsSheet) {
             PermissionsView(
                 fdaStatus: viewModel.fullDiskAccessStatus,
@@ -109,344 +88,245 @@ struct DashboardView: View {
 
     // MARK: - Sidebar
 
-    private var sidebar: some View {
-        VStack(spacing: 0) {
-            // App title area
-            HStack(spacing: 8) {
-                Image(systemName: "externaldrive.badge.checkmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(FUColors.accent)
+    private var sidebarContent: some View {
+        List(selection: Binding(
+            get: { selectedCategory?.rawValue },
+            set: { newValue in
+                selectedCategory = newValue.flatMap { FileCategory(rawValue: $0) }
+            }
+        )) {
+            // Home
+            Button {
+                withAnimation { selectedCategory = nil }
+            } label: {
+                Label("Overview", systemImage: "house")
+            }
+            .listRowSeparator(.hidden)
+            .foregroundStyle(selectedCategory == nil ? Color.accentColor : .primary)
 
+            if !sortedCategories.isEmpty || isScanning {
+                Section("Categories") {
+                    ForEach(sortedCategories) { category in
+                        SidebarCategoryRow(
+                            category: category,
+                            stats: viewModel.categoryStats[category],
+                            isSelected: selectedCategory == category,
+                            action: {
+                                withAnimation { selectedCategory = category }
+                            }
+                        )
+                        .tag(category.rawValue)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .top) {
+            sidebarHeader
+        }
+        .safeAreaInset(edge: .bottom) {
+            sidebarFooter
+        }
+    }
+
+    // MARK: - Sidebar Header
+
+    private var sidebarHeader: some View {
+        VStack(spacing: 8) {
+            HStack {
                 Text("FreeUp")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(FUColors.textPrimary)
+                    .font(.headline)
 
                 Spacer()
 
-                // Scan button
                 Button {
-                    Task { await viewModel.startScan() }
+                    if isScanning {
+                        viewModel.cancelScan()
+                    } else {
+                        Task { await viewModel.startScan() }
+                    }
                 } label: {
                     Image(systemName: isScanning ? "stop.fill" : "arrow.clockwise")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(isScanning ? FUColors.danger : FUColors.accent)
-                        .frame(width: 24, height: 24)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(isScanning ? FUColors.dangerDim : FUColors.accentDim)
-                        )
+                        .font(.system(size: 12, weight: .medium))
                 }
-                .buttonStyle(.plain)
-                .help(isScanning ? "Stop scan" : "Start scan")
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(isScanning ? .red : .accentColor)
+                .help(isScanning ? "Stop" : "Scan")
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
 
-            // Inline scan progress
             if isScanning {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.mini)
-                        .tint(FUColors.accent)
-
-                    Text("Scanning...")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(FUColors.textTertiary)
-
+                    Text("\(viewModel.totalFilesScanned) files found...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Spacer()
-
-                    Text("\(viewModel.totalFilesScanned)")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(FUColors.accent)
                 }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
             }
-
-            Rectangle()
-                .fill(FUColors.border)
-                .frame(height: 1)
-
-            // Category list
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    // Home row — always visible, returns to overview
-                    SidebarHomeRow(
-                        isSelected: selectedCategory == nil,
-                        action: {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                selectedCategory = nil
-                            }
-                        }
-                    )
-
-                    if sortedCategories.isEmpty && !isScanning {
-                        // Empty state
-                        VStack(spacing: 8) {
-                            Spacer().frame(height: 24)
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 20))
-                                .foregroundStyle(FUColors.textTertiary)
-                            Text("Run a scan to find files")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(FUColors.textTertiary)
-                        }
-                        .frame(maxWidth: .infinity)
-                    } else {
-                        // Section label
-                        Text("CATEGORIES")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(FUColors.textTertiary)
-                            .tracking(0.5)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 8)
-                            .padding(.bottom, 2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        ForEach(sortedCategories) { category in
-                            SidebarCategoryRow(
-                                category: category,
-                                stats: viewModel.categoryStats[category],
-                                isSelected: selectedCategory == category,
-                                action: {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        selectedCategory = category
-                                    }
-                                }
-                            )
-                        }
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-            }
-            .scrollContentBackground(.hidden)
-
-            Spacer(minLength: 0)
-
-            // Bottom: storage summary + clean up
-            sidebarFooter
         }
-        .background(FUColors.bgElevated)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Sidebar Footer
 
     private var sidebarFooter: some View {
         VStack(spacing: 8) {
-            Rectangle()
-                .fill(FUColors.border)
-                .frame(height: 1)
+            Divider()
 
-            // Mini storage bar
+            // Storage
             if let info = viewModel.volumeInfo {
-                VStack(spacing: 4) {
-                    HStack {
-                        Text(info.name)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(FUColors.textTertiary)
-                        Spacer()
-                        Text("\(ByteFormatter.format(info.availableCapacity)) free")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(FUColors.textTertiary)
-                    }
-
-                    // Tiny bar
-                    GeometryReader { geo in
-                        let ratio = Double(info.usedCapacity) / Double(max(info.totalCapacity, 1))
-                        HStack(spacing: 1) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(FUColors.accent)
-                                .frame(width: geo.size.width * CGFloat(min(ratio, 1.0)))
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(FUColors.border)
-                        }
-                    }
-                    .frame(height: 4)
-                    .clipShape(RoundedRectangle(cornerRadius: 2))
+                HStack {
+                    Text(info.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(ByteFormatter.format(info.availableCapacity)) free")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+
+                ProgressView(value: Double(info.usedCapacity), total: Double(max(info.totalCapacity, 1)))
+                    .tint(.blue)
             }
 
-            // Reclaimable + Clean Up
+            // Reclaimable
             if viewModel.reclaimableSpace > 0 && !isScanning {
-                HStack(spacing: 8) {
+                HStack {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Reclaimable")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(FUColors.textTertiary)
-                            .textCase(.uppercase)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                         Text(ByteFormatter.format(viewModel.reclaimableSpace))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(FUColors.accent)
+                            .font(.system(.body, design: .rounded, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
                     }
-
                     Spacer()
-
-                    Button {
+                    Button("Clean Up") {
                         showCleanupConfirmation = true
-                    } label: {
-                        Text("Clean Up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(FUColors.accentGradient)
-                            )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
             }
 
-            // Settings link
-            HStack(spacing: 6) {
-                if viewModel.fullDiskAccessStatus == .denied {
-                    Button {
-                        viewModel.openFullDiskAccessSettings()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(FUColors.cacheColor)
-                                .frame(width: 5, height: 5)
-                            Text("Grant Full Disk Access")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(FUColors.cacheColor)
-                        }
-                    }
-                    .buttonStyle(.plain)
+            if viewModel.fullDiskAccessStatus == .denied {
+                Button {
+                    viewModel.openFullDiskAccessSettings()
+                } label: {
+                    Label("Grant Full Disk Access", systemImage: "lock.shield")
+                        .font(.caption)
                 }
-                Spacer()
+                .buttonStyle(.plain)
+                .foregroundStyle(.orange)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.bottom, 12)
-        .padding(.top, 4)
     }
 
-    // MARK: - Detail Pane
+    // MARK: - Detail
 
     @ViewBuilder
-    private var detailPane: some View {
-        ZStack {
-            FUColors.bg
-                .ignoresSafeArea()
-
-            if isScanning && !hasResults {
-                // Full scan overlay when no results yet
-                ScanProgressView(
-                    state: viewModel.scanState,
-                    filesScanned: viewModel.totalFilesScanned,
-                    sizeScanned: viewModel.totalSizeScanned,
-                    onCancel: { viewModel.cancelScan() }
-                )
-            } else if let category = selectedCategory {
-                // Show category detail or duplicates
-                // .id(category) forces SwiftUI to destroy/recreate the view when
-                // the selected category changes, resetting all @State properly.
-                if category == .duplicates {
-                    DuplicatesView(viewModel: viewModel)
-                        .id(category)
-                } else {
-                    CategoryDetailView(category: category, viewModel: viewModel)
-                        .id(category)
-                }
+    private var detailContent: some View {
+        if isScanning && !hasResults {
+            ScanProgressView(
+                state: viewModel.scanState,
+                filesScanned: viewModel.totalFilesScanned,
+                sizeScanned: viewModel.totalSizeScanned,
+                onCancel: { viewModel.cancelScan() }
+            )
+        } else if let category = selectedCategory {
+            if category == .duplicates {
+                DuplicatesView(viewModel: viewModel)
+                    .id(category)
             } else {
-                // Hero / overview pane
-                overviewPane
+                CategoryDetailView(category: category, viewModel: viewModel)
+                    .id(category)
             }
+        } else {
+            overviewPane
         }
     }
 
-    // MARK: - Overview Pane (no category selected)
+    // MARK: - Overview
 
     private var overviewPane: some View {
         ScrollView {
-            VStack(spacing: 20) {
-                // Storage bar
+            VStack(spacing: 16) {
                 StorageBar(
                     volumeInfo: viewModel.volumeInfo,
                     reclaimableSpace: viewModel.reclaimableSpace
                 )
 
-                // Warning banners
+                // Warnings
                 if let warning = viewModel.snapshotWarning {
-                    WarningBanner(
-                        icon: "clock.arrow.circlepath",
-                        message: warning,
-                        tintColor: .orange
-                    )
+                    WarningBanner(icon: "clock.arrow.circlepath", message: warning, color: .orange)
                 }
 
                 if viewModel.fullDiskAccessStatus == .denied {
                     WarningBanner(
                         icon: "lock.shield",
                         message: "Grant Full Disk Access to scan protected folders",
-                        tintColor: .yellow,
+                        color: .yellow,
                         action: ("Open Settings", { viewModel.openFullDiskAccessSettings() })
                     )
                 }
 
-                // Duplicate detection progress
-                if case .detectingDuplicates(let progress) = viewModel.scanState {
-                    HStack(spacing: 12) {
-                        ProgressView(value: progress)
-                            .progressViewStyle(.linear)
-                            .tint(FUColors.accent)
+                if case .detectingDuplicates(let p) = viewModel.scanState {
+                    HStack(spacing: 10) {
+                        ProgressView(value: p)
+                            .tint(.accentColor)
                         Text("Finding duplicates...")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(FUColors.textSecondary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
                 if !hasResults && !isScanning {
-                    heroScanSection
+                    heroScan
                 } else if hasResults {
-                    scanSummarySection
-                }
-
-                // Reclaimable summary
-                if viewModel.reclaimableSpace > 0 && !isScanning {
-                    ReclaimableSummary(
-                        reclaimableSpace: viewModel.reclaimableSpace,
-                        onCleanup: { showCleanupConfirmation = true }
-                    )
+                    scanSummary
                 }
             }
-            .padding(24)
+            .padding(20)
         }
-        .scrollContentBackground(.hidden)
+        .background(Color(.windowBackgroundColor))
     }
 
-    // MARK: - Hero Scan Section
+    // MARK: - Hero Scan
 
-    @State private var heroGlowPhase = false
+    @State private var pulsePhase = false
 
-    private var heroScanSection: some View {
-        VStack(spacing: 24) {
+    private var heroScan: some View {
+        VStack(spacing: 20) {
             Spacer().frame(height: 40)
 
             ZStack {
+                // Pulse rings
                 Circle()
-                    .fill(FUColors.accent.opacity(heroGlowPhase ? 0.12 : 0.04))
+                    .stroke(Color.accentColor.opacity(pulsePhase ? 0.0 : 0.15), lineWidth: 2)
                     .frame(width: 120, height: 120)
-                    .blur(radius: 20)
+                    .scaleEffect(pulsePhase ? 1.4 : 1.0)
+
+                Circle()
+                    .stroke(Color.accentColor.opacity(pulsePhase ? 0.0 : 0.1), lineWidth: 1.5)
+                    .frame(width: 120, height: 120)
+                    .scaleEffect(pulsePhase ? 1.8 : 1.0)
 
                 Button {
                     Task { await viewModel.startScan() }
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(FUColors.accentGradient)
-                            .frame(width: 80, height: 80)
-                            .shadow(
-                                color: FUColors.accent.opacity(heroGlowPhase ? 0.45 : 0.2),
-                                radius: heroGlowPhase ? 24 : 12,
-                                y: 4
-                            )
+                            .fill(Color.accentColor)
+                            .frame(width: 72, height: 72)
+                            .shadow(color: Color.accentColor.opacity(0.3), radius: 12, y: 4)
+
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 28, weight: .semibold))
+                            .font(.system(size: 26, weight: .medium))
                             .foregroundStyle(.white)
                     }
                 }
@@ -454,87 +334,114 @@ struct DashboardView: View {
             }
             .onAppear {
                 withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
-                    heroGlowPhase = true
+                    pulsePhase = true
                 }
             }
 
-            VStack(spacing: 6) {
-                Text("Start Smart Scan")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(FUColors.textPrimary)
-                Text("Analyze your storage and find reclaimable space")
-                    .font(.system(size: 13))
-                    .foregroundStyle(FUColors.textSecondary)
-            }
+            Text("Smart Scan")
+                .font(.title3.weight(.medium))
+
+            Text("Analyze your storage and find reclaimable space")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
 
             Spacer().frame(height: 40)
         }
         .frame(maxWidth: .infinity)
-        .fuCard(cornerRadius: 16, padding: 24)
     }
 
-    // MARK: - Scan Summary (after scan, no category selected)
+    // MARK: - Scan Summary
 
-    private var scanSummarySection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Header
-            HStack(alignment: .firstTextBaseline) {
+    private var scanSummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
                 Text("Scan Results")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(FUColors.textPrimary)
-
-                if !sortedCategories.isEmpty {
-                    let totalCount = sortedCategories.reduce(0) {
-                        $0 + (viewModel.categoryStats[$1]?.count ?? 0)
-                    }
-                    Text("\(totalCount)")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(FUColors.accent)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(FUColors.accentDim))
-                }
+                    .font(.headline)
 
                 Spacer()
 
-                if case .completed(let files, let size, let duration) = viewModel.scanState {
-                    Text("\(files) files  \(ByteFormatter.format(size))  \(formatDuration(duration))")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(FUColors.textTertiary)
+                if case .completed(let files, let size, let dur) = viewModel.scanState {
+                    Text("\(files) files \u{2022} \(ByteFormatter.format(size)) \u{2022} \(formatDuration(dur))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
 
                 if isScanning {
-                    InlineScanProgress(
-                        state: viewModel.scanState,
-                        filesScanned: viewModel.totalFilesScanned
-                    )
+                    InlineScanProgress(state: viewModel.scanState, filesScanned: viewModel.totalFilesScanned)
                 }
             }
 
-            // Category summary cards — compact horizontal rows
-            VStack(spacing: 6) {
-                ForEach(sortedCategories) { category in
-                    SummaryCategoryRow(
-                        category: category,
-                        stats: viewModel.categoryStats[category],
-                        action: {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                selectedCategory = category
-                            }
+            ForEach(sortedCategories) { category in
+                Button {
+                    withAnimation { selectedCategory = category }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: category.iconName)
+                            .font(.system(size: 14))
+                            .foregroundStyle(category.themeColor)
+                            .frame(width: 22)
+
+                        Text(category.rawValue)
+                            .font(.body)
+                            .foregroundStyle(.primary)
+
+                        Spacer()
+
+                        if let stats = viewModel.categoryStats[category] {
+                            Text("\(stats.formattedCount)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+
+                            Text(ByteFormatter.format(stats.totalSize))
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 70, alignment: .trailing)
                         }
-                    )
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.quaternary)
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .background(Color(.controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                 }
+                .buttonStyle(.plain)
             }
         }
     }
 
-    // MARK: - Helpers
+    private func formatDuration(_ d: TimeInterval) -> String {
+        let f = DateComponentsFormatter()
+        f.allowedUnits = [.minute, .second]
+        f.unitsStyle = .abbreviated
+        return f.string(from: d) ?? ""
+    }
+}
 
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.minute, .second]
-        formatter.unitsStyle = .abbreviated
-        return formatter.string(from: duration) ?? ""
+// MARK: - Warning Banner
+
+struct WarningBanner: View {
+    let icon: String
+    let message: String
+    let color: Color
+    var action: (title: String, handler: () -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+            Text(message)
+                .font(.subheadline)
+            Spacer()
+            if let action {
+                Button(action.title, action: action.handler)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -544,173 +451,12 @@ struct SidebarHomeRow: View {
     let isSelected: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(FUColors.accent.opacity(isSelected ? 0.20 : 0.10))
-                    .frame(width: 30, height: 30)
-                    .overlay(
-                        Image(systemName: "house.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(FUColors.accent)
-                    )
-
-                Text("Home")
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? FUColors.textPrimary : FUColors.textSecondary)
-
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(
-                        isSelected
-                            ? FUColors.accent.opacity(0.10)
-                            : (isHovered ? FUColors.bgHover : Color.clear)
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(
-                        isSelected ? FUColors.accent.opacity(0.20) : Color.clear,
-                        lineWidth: 1
-                    )
-            )
+            Label("Overview", systemImage: "house")
+                .foregroundStyle(isSelected ? Color.accentColor : .primary)
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                isHovered = hovering
-            }
-        }
-    }
-}
-
-// MARK: - Summary Category Row (overview pane)
-
-private struct SummaryCategoryRow: View {
-    let category: FileCategory
-    let stats: CategoryDisplayStats?
-    let action: () -> Void
-
-    @State private var isHovered = false
-
-    private var themeColor: Color { category.themeColor }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(themeColor.opacity(0.10))
-                    .frame(width: 32, height: 32)
-                    .overlay(
-                        Image(systemName: category.iconName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(themeColor)
-                    )
-
-                Text(category.rawValue)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(FUColors.textPrimary)
-
-                Spacer()
-
-                if let stats {
-                    Text("\(stats.formattedCount) items")
-                        .font(.system(size: 11))
-                        .foregroundStyle(FUColors.textTertiary)
-
-                    Text(ByteFormatter.format(stats.totalSize))
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(themeColor)
-                        .frame(minWidth: 60, alignment: .trailing)
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(FUColors.textTertiary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isHovered ? FUColors.bgHover : FUColors.bgCard)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isHovered ? themeColor.opacity(0.15) : FUColors.border, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                isHovered = hovering
-            }
-        }
-    }
-}
-
-// MARK: - Warning Banner
-
-struct WarningBanner: View {
-    let icon: String
-    let message: String
-    let tintColor: Color
-    var action: (title: String, handler: () -> Void)? = nil
-
-    var body: some View {
-        HStack(spacing: 0) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(tintColor)
-                .frame(width: 3)
-                .padding(.vertical, 6)
-
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(tintColor)
-
-                Text(message)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(FUColors.textPrimary)
-
-                Spacer()
-
-                if let action {
-                    Button(action: action.handler) {
-                        Text(action.title)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(tintColor)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(tintColor.opacity(0.12))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .stroke(tintColor.opacity(0.25), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(FUColors.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(FUColors.border, lineWidth: 1)
-                )
-        )
     }
 }
 
@@ -720,67 +466,24 @@ struct ReclaimableSummary: View {
     let reclaimableSpace: Int64
     let onCleanup: () -> Void
 
-    @State private var isHoveredCleanup = false
-
     var body: some View {
-        HStack(spacing: 16) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(FUColors.accentGradient)
-                .frame(width: 4)
-
-            VStack(alignment: .leading, spacing: 6) {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Reclaimable Space")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(FUColors.textPrimary)
-
-                Text("Free up \(ByteFormatter.format(reclaimableSpace)) by removing cache, logs, and system junk.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(FUColors.textSecondary)
-                    .lineLimit(2)
+                    .font(.subheadline.weight(.medium))
+                Text("Remove cache, logs, and junk files")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-
             Spacer()
-
             Text(ByteFormatter.format(reclaimableSpace))
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundStyle(FUColors.accent)
-
-            Button(action: onCleanup) {
-                HStack(spacing: 6) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Clean Up")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(FUColors.accentGradient)
-                        .shadow(
-                            color: FUColors.accent.opacity(isHoveredCleanup ? 0.4 : 0.15),
-                            radius: isHoveredCleanup ? 12 : 6,
-                            y: 2
-                        )
-                )
-                .scaleEffect(isHoveredCleanup ? 1.03 : 1.0)
-            }
-            .buttonStyle(.plain)
-            .onHover { hovering in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    isHoveredCleanup = hovering
-                }
-            }
+                .font(.title2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(Color.accentColor)
+            Button("Clean Up", action: onCleanup)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(FUColors.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(FUColors.border, lineWidth: 1)
-                )
-        )
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 }
