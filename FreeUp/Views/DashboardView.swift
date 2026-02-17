@@ -23,9 +23,15 @@ struct DashboardView: View {
     }
 
     private var sortedCategories: [FileCategory] {
-        FileCategory.allCases.filter {
+        let visible = FileCategory.allCases.filter {
             viewModel.categoryStats[$0] != nil && viewModel.categoryStats[$0]!.count > 0
-        }.sorted {
+        }
+        // During scanning, keep stable declaration order to prevent row reordering animation.
+        // Only sort by size once scanning is complete.
+        if isScanning {
+            return visible
+        }
+        return visible.sorted {
             (viewModel.categoryStats[$0]?.totalSize ?? 0) > (viewModel.categoryStats[$1]?.totalSize ?? 0)
         }
     }
@@ -97,7 +103,7 @@ struct DashboardView: View {
         )) {
             // Home
             Button {
-                withAnimation { selectedCategory = nil }
+                selectedCategory = nil
             } label: {
                 Label("Overview", systemImage: "house")
             }
@@ -112,7 +118,7 @@ struct DashboardView: View {
                             stats: viewModel.categoryStats[category],
                             isSelected: selectedCategory == category,
                             action: {
-                                withAnimation { selectedCategory = category }
+                                selectedCategory = category
                             }
                         )
                         .tag(category.rawValue)
@@ -155,19 +161,22 @@ struct DashboardView: View {
                 .help(isScanning ? "Stop" : "Scan")
             }
 
-            if isScanning {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text("\(viewModel.totalFilesScanned) files found...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
+            // Fixed-height scanning indicator — uses opacity instead of
+            // conditional insertion to prevent the list from shifting vertically.
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("\(viewModel.totalFilesScanned) files found...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
+            .frame(height: 16)
+            .opacity(isScanning ? 1 : 0)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .animation(nil, value: isScanning)
     }
 
     // MARK: - Sidebar Footer
@@ -192,8 +201,8 @@ struct DashboardView: View {
                     .tint(.blue)
             }
 
-            // Reclaimable
-            if viewModel.reclaimableSpace > 0 && !isScanning {
+            // Reclaimable — always reserve space, toggle visibility to prevent layout shift
+            if viewModel.reclaimableSpace > 0 {
                 HStack {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Reclaimable")
@@ -209,7 +218,9 @@ struct DashboardView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
+                    .disabled(isScanning)
                 }
+                .opacity(isScanning ? 0.4 : 1.0)
             }
 
             if viewModel.fullDiskAccessStatus == .denied {
@@ -225,6 +236,7 @@ struct DashboardView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
+        .animation(nil, value: isScanning)
     }
 
     // MARK: - Detail
@@ -373,7 +385,7 @@ struct DashboardView: View {
 
             ForEach(sortedCategories) { category in
                 Button {
-                    withAnimation { selectedCategory = category }
+                    selectedCategory = category
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: category.iconName)
