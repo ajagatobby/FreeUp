@@ -7,160 +7,99 @@
 
 import SwiftUI
 
-/// Main dashboard view with storage overview and category cards
+/// Main dashboard view — dark, teal-accented, gradient-driven.
 struct DashboardView: View {
     @Bindable var viewModel: ScanViewModel
     @State private var selectedCategory: FileCategory?
     @State private var showingPermissionsSheet = false
     @State private var showingDuplicates = false
-    @State private var expandedCategories: Set<FileCategory> = [.cache] // Cache expanded by default
+    @State private var expandedCategories: Set<FileCategory> = [.cache]
     @State private var showCleanupConfirmation = false
-    
+    @State private var heroGlowPhase = false
+
+    // MARK: - Derived state
+
     private var isScanning: Bool {
         if case .scanning = viewModel.scanState { return true }
         if case .detectingDuplicates = viewModel.scanState { return true }
         return false
     }
-    
+
     private var sortedCategories: [FileCategory] {
-        // Only show categories that have found items, sorted by size
         FileCategory.allCases.filter {
             viewModel.categoryStats[$0] != nil && viewModel.categoryStats[$0]!.count > 0
         }.sorted {
             (viewModel.categoryStats[$0]?.totalSize ?? 0) > (viewModel.categoryStats[$1]?.totalSize ?? 0)
         }
     }
-    
-    /// Categories that should show sub-categories (have multiple sources)
-    private func hasSubCategories(_ category: FileCategory) -> Bool {
-        let subStats = viewModel.subCategoryStats(for: category)
-        return subStats.count > 1
+
+    private var hasResults: Bool {
+        !sortedCategories.isEmpty
     }
-    
+
+    private func hasSubCategories(_ category: FileCategory) -> Bool {
+        viewModel.subCategoryStats(for: category).count > 1
+    }
+
+    // MARK: - Body
+
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background
-                Color(.windowBackgroundColor)
+                // Deep dark background — fills entire window
+                FUColors.bg
                     .ignoresSafeArea()
-                
+
                 ScrollView {
-                    VStack(spacing: 24) {
-                        // Storage bar
+                    VStack(spacing: 20) {
+                        // --- Storage bar ---
                         StorageBar(
                             volumeInfo: viewModel.volumeInfo,
                             reclaimableSpace: viewModel.reclaimableSpace
                         )
-                        
-                        // Snapshot warning
+
+                        // --- Warning banners ---
                         if let warning = viewModel.snapshotWarning {
                             WarningBanner(
                                 icon: "clock.arrow.circlepath",
                                 message: warning,
-                                color: .orange
+                                tintColor: .orange
                             )
                         }
-                        
-                        // FDA warning if needed
+
                         if viewModel.fullDiskAccessStatus == .denied {
                             WarningBanner(
                                 icon: "lock.shield",
                                 message: "Grant Full Disk Access to scan protected folders",
-                                color: .yellow,
+                                tintColor: .yellow,
                                 action: ("Open Settings", {
                                     viewModel.openFullDiskAccessSettings()
                                 })
                             )
                         }
-                        
-                        // Scan controls
-                        HStack {
-                            Text("Categories")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            
-                            Spacer()
-                            
-                            if case .completed(let files, let size, let duration) = viewModel.scanState {
-                                Text("\(files) files • \(ByteFormatter.format(size)) • \(formatDuration(duration))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            if isScanning {
-                                InlineScanProgress(
-                                    state: viewModel.scanState,
-                                    filesScanned: viewModel.totalFilesScanned
-                                )
-                            }
-                        }
-                        
-                        // Duplicate detection progress
+
+                        // --- Duplicate detection progress ---
                         if case .detectingDuplicates(let progress) = viewModel.scanState {
                             HStack(spacing: 12) {
                                 ProgressView(value: progress)
                                     .progressViewStyle(.linear)
-                                
+                                    .tint(FUColors.accent)
+
                                 Text("Finding duplicates...")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(FUColors.textSecondary)
                             }
-                            .padding(.horizontal)
+                            .padding(.horizontal, 4)
                         }
-                        
-                        // Category grid
-                        if sortedCategories.isEmpty && isScanning {
-                            // Show placeholder during initial scan
-                            VStack(spacing: 16) {
-                                ProgressView()
-                                    .scaleEffect(1.2)
-                                Text("Finding junk files...")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 200)
+
+                        // --- Hero scan button OR category grid ---
+                        if !hasResults && !isScanning {
+                            heroScanSection
                         } else {
-                            VStack(spacing: 16) {
-                                ForEach(sortedCategories) { category in
-                                    if hasSubCategories(category) {
-                                        // Expandable category with sub-categories
-                                        ExpandableCategorySection(
-                                            category: category,
-                                            stats: viewModel.categoryStats[category],
-                                            subCategories: viewModel.subCategoryStats(for: category),
-                                            isExpanded: expandedCategories.contains(category),
-                                            onToggleExpand: {
-                                                withAnimation(.easeInOut(duration: 0.2)) {
-                                                    if expandedCategories.contains(category) {
-                                                        expandedCategories.remove(category)
-                                                    } else {
-                                                        expandedCategories.insert(category)
-                                                    }
-                                                }
-                                            },
-                                            onCategoryTap: {
-                                                selectedCategory = category
-                                            }
-                                        )
-                                    } else {
-                                        // Regular category card in a grid-like layout
-                                        HStack {
-                                            CategoryCard(
-                                                category: category,
-                                                stats: viewModel.categoryStats[category],
-                                                isScanning: false
-                                            ) {
-                                                selectedCategory = category
-                                            }
-                                            .frame(maxWidth: 220)
-                                            Spacer()
-                                        }
-                                    }
-                                }
-                            }
+                            categoryGridSection
                         }
-                        
-                        // Reclaimable space summary
+
+                        // --- Reclaimable summary ---
                         if viewModel.reclaimableSpace > 0 && !isScanning {
                             ReclaimableSummary(
                                 reclaimableSpace: viewModel.reclaimableSpace,
@@ -170,14 +109,16 @@ struct DashboardView: View {
                             )
                         }
                     }
-                    .padding()
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
                 }
-                
-                // Scanning overlay
+                .scrollContentBackground(.hidden)
+
+                // --- Scanning overlay (only early scan) ---
                 if isScanning && viewModel.totalFilesScanned < 100 {
-                    Color.black.opacity(0.3)
+                    Color.black.opacity(0.55)
                         .ignoresSafeArea()
-                    
+
                     ScanProgressView(
                         state: viewModel.scanState,
                         filesScanned: viewModel.totalFilesScanned,
@@ -186,33 +127,41 @@ struct DashboardView: View {
                             viewModel.cancelScan()
                         }
                     )
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
             }
             .navigationTitle("FreeUp")
+            .toolbarBackground(FUColors.bg, for: .windowToolbar)
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     if isScanning {
-                        Button("Cancel") {
+                        Button {
                             viewModel.cancelScan()
+                        } label: {
+                            Text("Cancel")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(FUColors.danger)
                         }
+                        .buttonStyle(.plain)
                     } else {
                         Button {
                             Task {
                                 await viewModel.startScan()
                             }
                         } label: {
-                            Label("Smart Scan", systemImage: "magnifyingglass")
+                            Label("Scan", systemImage: "magnifyingglass")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(FUColors.accent)
                         }
-                        
+                        .buttonStyle(.plain)
+
                         Menu {
                             Button("Smart Scan") {
-                                Task {
-                                    await viewModel.startScan()
-                                }
+                                Task { await viewModel.startScan() }
                             }
-                            
+
                             Divider()
-                            
+
                             Button("Scan Custom Folder...") {
                                 Task {
                                     if let url = await viewModel.selectDirectory() {
@@ -220,15 +169,18 @@ struct DashboardView: View {
                                     }
                                 }
                             }
-                            
+
                             Divider()
-                            
+
                             Button("Privacy Settings...") {
                                 viewModel.openFullDiskAccessSettings()
                             }
                         } label: {
                             Label("Options", systemImage: "ellipsis.circle")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(FUColors.textSecondary)
                         }
+                        .menuStyle(.borderlessButton)
                     }
                 }
             }
@@ -242,6 +194,7 @@ struct DashboardView: View {
                     )
                 }
             }
+            // Cleanup confirmation
             .alert("Clean Up", isPresented: $showCleanupConfirmation) {
                 Button("Cancel", role: .cancel) { }
                 Button("Clean Up", role: .destructive) {
@@ -252,6 +205,7 @@ struct DashboardView: View {
             } message: {
                 Text("This will \(viewModel.currentDeleteMode == .moveToTrash ? "move to Trash" : "permanently delete") cache files, logs, and system junk to free up \(ByteFormatter.format(viewModel.reclaimableSpace)). Continue?")
             }
+            // Deletion result
             .alert(
                 viewModel.lastDeletionResult?.allSuccessful == true ? "Cleanup Complete" : "Cleanup Result",
                 isPresented: Binding(
@@ -277,6 +231,7 @@ struct DashboardView: View {
                     }
                 }
             }
+            // Permissions sheet
             .sheet(isPresented: $showingPermissionsSheet) {
                 PermissionsView(
                     fdaStatus: viewModel.fullDiskAccessStatus,
@@ -291,16 +246,177 @@ struct DashboardView: View {
             }
             .onAppear {
                 viewModel.checkPermissions()
-                
-                // Only show permissions sheet if FDA is explicitly denied
-                // Don't show if granted or if we couldn't determine status
                 if viewModel.fullDiskAccessStatus == .denied {
                     showingPermissionsSheet = true
                 }
             }
         }
     }
-    
+
+    // MARK: - Hero scan section (idle, no results)
+
+    private var heroScanSection: some View {
+        VStack(spacing: 24) {
+            Spacer()
+                .frame(height: 32)
+
+            // Pulsing glow behind button
+            ZStack {
+                // Outer glow ring
+                Circle()
+                    .fill(FUColors.accent.opacity(heroGlowPhase ? 0.12 : 0.04))
+                    .frame(width: 120, height: 120)
+                    .blur(radius: 20)
+
+                // Gradient circle button
+                Button {
+                    Task { await viewModel.startScan() }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(FUColors.accentGradient)
+                            .frame(width: 80, height: 80)
+                            .shadow(
+                                color: FUColors.accent.opacity(heroGlowPhase ? 0.45 : 0.2),
+                                radius: heroGlowPhase ? 24 : 12,
+                                y: 4
+                            )
+
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .onAppear {
+                withAnimation(
+                    .easeInOut(duration: 2.0)
+                    .repeatForever(autoreverses: true)
+                ) {
+                    heroGlowPhase = true
+                }
+            }
+
+            VStack(spacing: 6) {
+                Text("Start Smart Scan")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(FUColors.textPrimary)
+
+                Text("Analyze your storage and find reclaimable space")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(FUColors.textSecondary)
+            }
+
+            Spacer()
+                .frame(height: 32)
+        }
+        .frame(maxWidth: .infinity)
+        .fuCard(cornerRadius: 16, padding: 24)
+    }
+
+    // MARK: - Category grid section (results exist)
+
+    private var categoryGridSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section header
+            HStack(alignment: .firstTextBaseline) {
+                Text("Found Items")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(FUColors.textPrimary)
+
+                if !sortedCategories.isEmpty {
+                    let totalCount = sortedCategories.reduce(0) {
+                        $0 + (viewModel.categoryStats[$1]?.count ?? 0)
+                    }
+                    Text("\(totalCount)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(FUColors.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(FUColors.accentDim)
+                        )
+                }
+
+                Spacer()
+
+                if case .completed(let files, let size, let duration) = viewModel.scanState {
+                    Text("\(files) files  \(ByteFormatter.format(size))  \(formatDuration(duration))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(FUColors.textTertiary)
+                }
+
+                if isScanning {
+                    InlineScanProgress(
+                        state: viewModel.scanState,
+                        filesScanned: viewModel.totalFilesScanned
+                    )
+                }
+            }
+
+            if sortedCategories.isEmpty && isScanning {
+                // Placeholder during initial scan
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(1.1)
+                        .tint(FUColors.accent)
+                    Text("Finding junk files...")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(FUColors.textSecondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else {
+                // Expandable categories first, then grid for the rest
+                let expandableCategories = sortedCategories.filter { hasSubCategories($0) }
+                let gridCategories = sortedCategories.filter { !hasSubCategories($0) }
+
+                // Expandable sections
+                ForEach(expandableCategories) { category in
+                    ExpandableCategorySection(
+                        category: category,
+                        stats: viewModel.categoryStats[category],
+                        subCategories: viewModel.subCategoryStats(for: category),
+                        isExpanded: expandedCategories.contains(category),
+                        onToggleExpand: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if expandedCategories.contains(category) {
+                                    expandedCategories.remove(category)
+                                } else {
+                                    expandedCategories.insert(category)
+                                }
+                            }
+                        },
+                        onCategoryTap: {
+                            selectedCategory = category
+                        }
+                    )
+                }
+
+                // Grid of remaining category cards
+                if !gridCategories.isEmpty {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 180, maximum: 240), spacing: 12)],
+                        spacing: 12
+                    ) {
+                        ForEach(gridCategories) { category in
+                            CategoryCard(
+                                category: category,
+                                stats: viewModel.categoryStats[category],
+                                isScanning: false
+                            ) {
+                                selectedCategory = category
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
     private func formatDuration(_ duration: TimeInterval) -> String {
         let formatter = DateComponentsFormatter()
         formatter.allowedUnits = [.minute, .second]
@@ -309,7 +425,68 @@ struct DashboardView: View {
     }
 }
 
-/// Expandable category section with sub-categories
+// MARK: - Warning Banner (dark themed)
+
+struct WarningBanner: View {
+    let icon: String
+    let message: String
+    let tintColor: Color
+    var action: (title: String, handler: () -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Colored left accent bar
+            RoundedRectangle(cornerRadius: 2)
+                .fill(tintColor)
+                .frame(width: 3)
+                .padding(.vertical, 6)
+
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(tintColor)
+
+                Text(message)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(FUColors.textPrimary)
+
+                Spacer()
+
+                if let action {
+                    Button(action: action.handler) {
+                        Text(action.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(tintColor)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(tintColor.opacity(0.12))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(tintColor.opacity(0.25), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(FUColors.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(FUColors.border, lineWidth: 1)
+                )
+        )
+    }
+}
+
+// MARK: - Expandable Category Section (dark themed)
+
 struct ExpandableCategorySection: View {
     let category: FileCategory
     let stats: CategoryStats?
@@ -317,79 +494,79 @@ struct ExpandableCategorySection: View {
     let isExpanded: Bool
     let onToggleExpand: () -> Void
     let onCategoryTap: () -> Void
-    
-    private var color: Color { category.color }
-    
+
+    private var themeColor: Color { category.themeColor }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Category header
             HStack(spacing: 12) {
                 Button(action: onToggleExpand) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(FUColors.textTertiary)
                             .frame(width: 12)
-                        
-                        ZStack {
-                            Circle()
-                                .fill(color.opacity(0.15))
-                                .frame(width: 40, height: 40)
-                            
-                            Image(systemName: category.iconName)
-                                .font(.title3)
-                                .foregroundStyle(color)
-                        }
-                        
+
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(themeColor.opacity(0.12))
+                            .frame(width: 40, height: 40)
+                            .overlay(
+                                Image(systemName: category.iconName)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(themeColor)
+                            )
+
                         VStack(alignment: .leading, spacing: 2) {
                             Text(category.rawValue)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(FUColors.textPrimary)
+
                             Text("\(subCategories.count) sources")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(FUColors.textSecondary)
                         }
                     }
                 }
                 .buttonStyle(.plain)
-                
+
                 Spacer()
-                
-                if let stats = stats {
+
+                if let stats {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(ByteFormatter.format(stats.totalSize))
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(color)
-                        
-                        Text("\(stats.count) items")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(themeColor)
+
+                        Text("\(stats.formattedCount) items")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(FUColors.textSecondary)
                     }
                 }
-                
+
                 Button(action: onCategoryTap) {
                     Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(FUColors.textTertiary)
                         .padding(8)
-                        .background(Circle().fill(Color(.controlBackgroundColor)))
+                        .background(
+                            Circle()
+                                .fill(FUColors.bgHover)
+                                .overlay(
+                                    Circle()
+                                        .stroke(FUColors.border, lineWidth: 1)
+                                )
+                        )
                 }
                 .buttonStyle(.plain)
                 .help("View all \(category.rawValue) files")
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.background)
-                    .shadow(color: .black.opacity(0.08), radius: 5, y: 2)
-            )
-            
+            .fuCard(cornerRadius: 14, padding: 14)
+
             // Sub-categories grid (when expanded)
             if isExpanded {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 160, maximum: 200))],
+                    columns: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 10)],
                     spacing: 10
                 ) {
                     ForEach(subCategories, id: \.source) { subCat in
@@ -397,7 +574,7 @@ struct ExpandableCategorySection: View {
                             source: subCat.source,
                             count: subCat.count,
                             totalSize: subCat.totalSize,
-                            color: color
+                            color: themeColor
                         )
                     }
                 }
@@ -407,15 +584,16 @@ struct ExpandableCategorySection: View {
     }
 }
 
-/// Small card for sub-category display
+// MARK: - Sub-Category Card (dark themed)
+
 struct SubCategoryCard: View {
     let source: String
     let count: Int
     let totalSize: Int64
     let color: Color
-    
+
     @State private var isHovered = false
-    
+
     private var iconName: String {
         switch source.lowercased() {
         case let s where s.contains("safari"): return "safari"
@@ -442,41 +620,40 @@ struct SubCategoryCard: View {
         default: return "folder"
         }
     }
-    
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: iconName)
-                .font(.body)
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(color)
                 .frame(width: 24)
-            
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(source)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(FUColors.textPrimary)
                     .lineLimit(1)
-                
+
                 Text("\(count) files")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .regular))
+                    .foregroundStyle(FUColors.textTertiary)
             }
-            
+
             Spacer()
-            
+
             Text(ByteFormatter.format(totalSize))
-                .font(.caption)
-                .fontWeight(.semibold)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundStyle(color)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isHovered ? color.opacity(0.08) : Color(.controlBackgroundColor))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHovered ? color.opacity(0.08) : FUColors.bgCard)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(isHovered ? color.opacity(0.3) : .clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(isHovered ? color.opacity(0.25) : FUColors.border, lineWidth: 1)
         )
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
@@ -486,98 +663,76 @@ struct SubCategoryCard: View {
     }
 }
 
-/// Warning banner for important messages
-struct WarningBanner: View {
-    let icon: String
-    let message: String
-    let color: Color
-    var action: (title: String, handler: () -> Void)? = nil
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .foregroundStyle(color)
-            
-            Text(message)
-                .font(.subheadline)
-            
-            Spacer()
-            
-            if let action = action {
-                Button(action.title, action: action.handler)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(color.opacity(0.1))
-                .stroke(color.opacity(0.3), lineWidth: 1)
-        )
-    }
-}
+// MARK: - Reclaimable Summary (dark themed, gradient accent)
 
-/// Summary of reclaimable space with cleanup action
 struct ReclaimableSummary: View {
     let reclaimableSpace: Int64
     let onCleanup: () -> Void
-    
+
+    @State private var isHoveredCleanup = false
+
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 16) {
+            // Left: gradient accent strip
+            RoundedRectangle(cornerRadius: 3)
+                .fill(FUColors.accentGradient)
+                .frame(width: 4)
+
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Reclaimable Space")
-                    .font(.headline)
-                
-                Text("You can free up \(ByteFormatter.format(reclaimableSpace)) by removing cache, logs, and system junk.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(FUColors.textPrimary)
+
+                Text("Free up \(ByteFormatter.format(reclaimableSpace)) by removing cache, logs, and system junk.")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(FUColors.textSecondary)
+                    .lineLimit(2)
             }
-            
+
             Spacer()
-            
+
+            // Prominent reclaimable size
+            Text(ByteFormatter.format(reclaimableSpace))
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(FUColors.accent)
+
+            // Clean Up button with gradient
             Button(action: onCleanup) {
-                Label("Clean Up", systemImage: "trash")
+                HStack(spacing: 6) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Clean Up")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(FUColors.accentGradient)
+                        .shadow(
+                            color: FUColors.accent.opacity(isHoveredCleanup ? 0.4 : 0.15),
+                            radius: isHoveredCleanup ? 12 : 6,
+                            y: 2
+                        )
+                )
+                .scaleEffect(isHoveredCleanup ? 1.03 : 1.0)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.orange)
+            .buttonStyle(.plain)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    isHoveredCleanup = hovering
+                }
+            }
         }
-        .padding()
+        .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.orange.opacity(0.1))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(FUColors.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(FUColors.border, lineWidth: 1)
+                )
         )
     }
-}
-
-#Preview("Dashboard") {
-    DashboardView(viewModel: ScanViewModel())
-}
-
-#Preview("Expandable Section") {
-    VStack(spacing: 20) {
-        ExpandableCategorySection(
-            category: .cache,
-            stats: CategoryStats(count: 15000, totalSize: 2_500_000_000),
-            subCategories: [
-                (source: "Chrome Cache", count: 5000, totalSize: 800_000_000),
-                (source: "Safari Cache", count: 3000, totalSize: 500_000_000),
-                (source: "User Caches", count: 4000, totalSize: 450_000_000),
-                (source: "Homebrew Cache", count: 200, totalSize: 400_000_000),
-                (source: "Spotlight Index", count: 2800, totalSize: 350_000_000)
-            ],
-            isExpanded: true,
-            onToggleExpand: {},
-            onCategoryTap: {}
-        )
-        
-        SubCategoryCard(
-            source: "Safari Cache",
-            count: 3000,
-            totalSize: 500_000_000,
-            color: .yellow
-        )
-    }
-    .padding()
-    .background(Color(.windowBackgroundColor))
 }

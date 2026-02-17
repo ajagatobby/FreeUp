@@ -78,6 +78,8 @@ struct FreeUpApp: App {
         WindowGroup {
             DashboardView(viewModel: scanViewModel)
                 .frame(minWidth: 800, minHeight: 600)
+                .preferredColorScheme(.dark)
+                .background(FUColors.bg)
         }
         .modelContainer(sharedModelContainer)
         .windowStyle(.automatic)
@@ -150,6 +152,7 @@ struct FreeUpApp: App {
         // Settings window
         Settings {
             SettingsView()
+                .preferredColorScheme(.dark)
         }
     }
 }
@@ -183,7 +186,8 @@ struct SettingsView: View {
                     Label("About", systemImage: "info.circle")
                 }
         }
-        .frame(width: 450, height: 300)
+        .frame(width: 450, height: 320)
+        .background(FUColors.bg)
     }
 }
 
@@ -212,6 +216,7 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .padding()
     }
 }
@@ -231,12 +236,13 @@ struct PerformanceSettingsView: View {
                 
                 Text("Larger batch sizes reduce UI updates during scanning but may feel less responsive.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(FUColors.textSecondary)
             } header: {
                 Text("Scanning Performance")
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .padding()
     }
 }
@@ -244,33 +250,42 @@ struct PerformanceSettingsView: View {
 struct AboutView: View {
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "externaldrive.badge.checkmark")
-                .font(.system(size: 60))
-                .foregroundStyle(Color.accentColor)
+            // Gradient icon
+            ZStack {
+                Circle()
+                    .fill(FUColors.accentDim)
+                    .frame(width: 80, height: 80)
+
+                Image(systemName: "externaldrive.badge.checkmark")
+                    .font(.system(size: 32, weight: .medium))
+                    .foregroundStyle(FUColors.accent)
+            }
             
             Text("FreeUp")
-                .font(.title)
-                .fontWeight(.bold)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(FUColors.textPrimary)
             
             Text("Version 1.0")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(FUColors.textSecondary)
             
             Text("A high-performance macOS storage cleaner")
-                .font(.body)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13))
+                .foregroundStyle(FUColors.textSecondary)
             
             Text("Find duplicates, junk files, caches, and free up disk space.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(FUColors.textTertiary)
                 .multilineTextAlignment(.center)
             
             Spacer()
             
-            Text("© 2026 Mecury Labs")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            Text("\u{00A9} 2026 Mecury Labs")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(FUColors.textTertiary)
         }
         .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(FUColors.bg)
     }
 }

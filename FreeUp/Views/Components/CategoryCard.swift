@@ -7,177 +7,96 @@
 
 import SwiftUI
 
-/// Dashboard category card showing file type statistics
+/// Premium dark-themed category card for the dashboard grid.
 struct CategoryCard: View {
     let category: FileCategory
     let stats: CategoryDisplayStats?
     let isScanning: Bool
     let action: () -> Void
-    
+
     @State private var isHovered = false
-    
-    private var color: Color { category.color }
-    
+
+    private var themeColor: Color { category.themeColor }
+
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Icon and title
-                HStack {
-                    ZStack {
-                        Circle()
-                            .fill(color.opacity(0.15))
-                            .frame(width: 44, height: 44)
-                        
+            VStack(alignment: .leading, spacing: 10) {
+                // --- Icon badge ---
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(themeColor.opacity(0.12))
+                    .frame(width: 38, height: 38)
+                    .overlay(
                         Image(systemName: category.iconName)
-                            .font(.title2)
-                            .foregroundStyle(color)
-                    }
-                    
-                    Spacer()
-                    
-                    if isScanning {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    } else if let stats = stats, stats.count > 0 {
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                
-                Spacer()
-                
-                // Category name and stats
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(category.rawValue)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    
-                    if let stats = stats {
-                        HStack {
-                            Text(stats.formattedSize)
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(color)
-                            
-                            Spacer()
-                            
-                            Text("\(stats.formattedCount) items")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Text(isScanning ? "Looking..." : "No items")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(themeColor)
+                    )
+
+                Spacer(minLength: 0)
+
+                // --- Category name ---
+                Text(category.rawValue)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(FUColors.textPrimary)
+                    .lineLimit(1)
+
+                // --- Size + count ---
+                if let stats {
+                    Text(ByteFormatter.format(stats.totalSize))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(themeColor)
+                        .lineLimit(1)
+
+                    Text("\(stats.formattedCount) items")
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(FUColors.textSecondary)
+                        .lineLimit(1)
+                } else if isScanning {
+                    scanningPlaceholder
+                } else {
+                    Text("No items")
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(FUColors.textSecondary)
                 }
             }
-            .padding()
-            .frame(minHeight: 140)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 130)
             .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.background)
-                    .shadow(
-                        color: isHovered ? color.opacity(0.2) : .black.opacity(0.08),
-                        radius: isHovered ? 10 : 5,
-                        y: isHovered ? 4 : 2
-                    )
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isHovered ? FUColors.bgHover : FUColors.bgCard)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(isHovered ? color.opacity(0.3) : .clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(
+                        isHovered ? themeColor.opacity(0.20) : FUColors.border,
+                        lineWidth: 1
+                    )
             )
-            .scaleEffect(isHovered ? 1.02 : 1.0)
+            .shadow(
+                color: isHovered ? themeColor.opacity(0.10) : .black.opacity(0.15),
+                radius: isHovered ? 12 : 4,
+                y: isHovered ? 4 : 2
+            )
+            .offset(y: isHovered ? -2 : 0)
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(.easeOut(duration: 0.2)) {
                 isHovered = hovering
             }
         }
     }
-}
 
-/// Compact category card for smaller displays
-struct CompactCategoryCard: View {
-    let category: FileCategory
-    let stats: CategoryDisplayStats?
-    let action: () -> Void
-    
-    private var color: Color { category.color }
-    
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: category.iconName)
-                    .font(.title3)
-                    .foregroundStyle(color)
-                    .frame(width: 32)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(category.rawValue)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
-                    if let stats = stats {
-                        Text("\(stats.formattedCount) items")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                if let stats = stats {
-                    Text(stats.formattedSize)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(color)
-                }
-                
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(.background)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
+    // MARK: - Scanning placeholder
 
-#Preview {
-    VStack(spacing: 20) {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 16) {
-            CategoryCard(
-                category: .cache,
-                stats: CategoryDisplayStats(count: 1234, totalSize: 5_000_000_000),
-                isScanning: false
-            ) {}
-            
-            CategoryCard(
-                category: .videos,
-                stats: CategoryDisplayStats(count: 56, totalSize: 25_000_000_000),
-                isScanning: false
-            ) {}
-            
-            CategoryCard(
-                category: .photos,
-                stats: nil,
-                isScanning: true
-            ) {}
+    @ViewBuilder
+    private var scanningPlaceholder: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Scanning...")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(FUColors.textSecondary)
         }
-        
-        CompactCategoryCard(
-            category: .logs,
-            stats: CategoryDisplayStats(count: 500, totalSize: 500_000_000)
-        ) {}
     }
-    .padding()
-    .background(Color(.windowBackgroundColor))
 }

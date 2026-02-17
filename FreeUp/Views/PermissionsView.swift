@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// View for guiding users through Full Disk Access setup
+/// View for guiding users through Full Disk Access setup — dark themed
 struct PermissionsView: View {
     let fdaStatus: PermissionStatus
     let onOpenSettings: () -> Void
@@ -17,10 +17,10 @@ struct PermissionsView: View {
     
     private var statusColor: Color {
         switch fdaStatus {
-        case .granted: return .green
-        case .denied: return .orange
-        case .notDetermined: return .yellow
-        case .restricted: return .red
+        case .granted: return FUColors.developerColor
+        case .denied: return FUColors.cacheColor
+        case .notDetermined: return FUColors.cacheColor.opacity(0.7)
+        case .restricted: return FUColors.danger
         }
     }
     
@@ -43,136 +43,200 @@ struct PermissionsView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            VStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill(statusColor.opacity(0.15))
-                        .frame(width: 80, height: 80)
+        ZStack {
+            FUColors.bg
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header
+                VStack(spacing: 16) {
+                    ZStack {
+                        Circle()
+                            .fill(statusColor.opacity(0.12))
+                            .frame(width: 80, height: 80)
+                        
+                        Image(systemName: statusIcon)
+                            .font(.system(size: 36, weight: .medium))
+                            .foregroundStyle(statusColor)
+                    }
                     
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 36))
-                        .foregroundStyle(statusColor)
+                    Text(statusText)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(FUColors.textPrimary)
+                    
+                    Text(descriptionText)
+                        .font(.system(size: 13))
+                        .foregroundStyle(FUColors.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
                 }
+                .padding(.vertical, 30)
                 
-                Text(statusText)
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                Rectangle()
+                    .fill(FUColors.border)
+                    .frame(height: 1)
                 
-                Text(descriptionText)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-            .padding(.vertical, 30)
-            
-            Divider()
-            
-            // Steps (only show if not granted)
-            if fdaStatus != .granted {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        Text("How to enable Full Disk Access:")
-                            .font(.headline)
-                            .padding(.top)
-                        
-                        StepView(
-                            number: 1,
-                            title: "Open System Settings",
-                            description: "Click the button below or go to Apple menu > System Settings",
-                            isActive: currentStep == 0
-                        )
-                        
-                        StepView(
-                            number: 2,
-                            title: "Navigate to Privacy & Security",
-                            description: "In the sidebar, click Privacy & Security",
-                            isActive: currentStep == 1
-                        )
-                        
-                        StepView(
-                            number: 3,
-                            title: "Find Full Disk Access",
-                            description: "Scroll down and click Full Disk Access",
-                            isActive: currentStep == 2
-                        )
-                        
-                        StepView(
-                            number: 4,
-                            title: "Enable FreeUp",
-                            description: "Find FreeUp in the list and toggle it on. You may need to enter your password.",
-                            isActive: currentStep == 3
-                        )
-                        
-                        // Note about app appearing
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: "info.circle")
-                                .foregroundStyle(.blue)
+                // Steps (only show if not granted)
+                if fdaStatus != .granted {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            Text("How to enable Full Disk Access:")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(FUColors.textPrimary)
+                                .padding(.top)
                             
-                            Text("FreeUp should appear in the list automatically. If it doesn't, click the + button to add it manually from your Applications folder.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            StepView(
+                                number: 1,
+                                title: "Open System Settings",
+                                description: "Click the button below or go to Apple menu > System Settings",
+                                isActive: currentStep == 0
+                            )
+                            
+                            StepView(
+                                number: 2,
+                                title: "Navigate to Privacy & Security",
+                                description: "In the sidebar, click Privacy & Security",
+                                isActive: currentStep == 1
+                            )
+                            
+                            StepView(
+                                number: 3,
+                                title: "Find Full Disk Access",
+                                description: "Scroll down and click Full Disk Access",
+                                isActive: currentStep == 2
+                            )
+                            
+                            StepView(
+                                number: 4,
+                                title: "Enable FreeUp",
+                                description: "Find FreeUp in the list and toggle it on. You may need to enter your password.",
+                                isActive: currentStep == 3
+                            )
+                            
+                            // Note about app appearing
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: "info.circle")
+                                    .foregroundStyle(FUColors.downloadsColor)
+                                
+                                Text("FreeUp should appear in the list automatically. If it doesn't, click the + button to add it manually from your Applications folder.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(FUColors.textSecondary)
+                            }
+                            .padding(14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(FUColors.downloadsColor.opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(FUColors.downloadsColor.opacity(0.15), lineWidth: 1)
+                                    )
+                            )
                         }
                         .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.blue.opacity(0.1))
-                        )
                     }
-                    .padding()
-                }
-            } else {
-                // Success state
-                VStack(spacing: 20) {
-                    Spacer()
-                    
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(.green)
-                    
-                    Text("You're all set!")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                    
-                    Text("FreeUp can now access protected folders to find all reclaimable storage.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                    
-                    Spacer()
-                }
-            }
-            
-            Divider()
-            
-            // Action buttons
-            HStack {
-                if fdaStatus != .granted {
-                    Button("Open System Settings") {
-                        onOpenSettings()
-                        advanceStep()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                
-                Spacer()
-                
-                if fdaStatus == .granted {
-                    Button("Get Started") {
-                        onDismiss()
-                    }
-                    .buttonStyle(.borderedProminent)
+                    .scrollContentBackground(.hidden)
                 } else {
-                    Button("Continue Without Full Access") {
-                        onDismiss()
+                    // Success state
+                    VStack(spacing: 20) {
+                        Spacer()
+                        
+                        ZStack {
+                            Circle()
+                                .fill(FUColors.developerColor.opacity(0.12))
+                                .frame(width: 72, height: 72)
+
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 38))
+                                .foregroundStyle(FUColors.developerColor)
+                        }
+                        
+                        Text("You're all set!")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(FUColors.textPrimary)
+                        
+                        Text("FreeUp can now access protected folders to find all reclaimable storage.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(FUColors.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                        
+                        Spacer()
                     }
-                    .buttonStyle(.bordered)
                 }
+                
+                Rectangle()
+                    .fill(FUColors.border)
+                    .frame(height: 1)
+                
+                // Action buttons
+                HStack {
+                    if fdaStatus != .granted {
+                        Button {
+                            onOpenSettings()
+                            advanceStep()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "gear")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Open System Settings")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(FUColors.accentGradient)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    Spacer()
+                    
+                    if fdaStatus == .granted {
+                        Button {
+                            onDismiss()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Get Started")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(FUColors.accentGradient)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            onDismiss()
+                        } label: {
+                            Text("Continue Without Full Access")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(FUColors.textSecondary)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(FUColors.bgHover)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                .stroke(FUColors.border, lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+                .background(FUColors.bgElevated)
             }
-            .padding()
         }
         .frame(width: 500, height: 600)
     }
@@ -199,7 +263,7 @@ struct PermissionsView: View {
     }
 }
 
-/// Single step in the setup process
+/// Single step in the setup process — dark themed
 struct StepView: View {
     let number: Int
     let title: String
@@ -210,38 +274,42 @@ struct StepView: View {
         HStack(alignment: .top, spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(isActive ? Color.accentColor : Color.secondary.opacity(0.2))
+                    .fill(isActive ? FUColors.accent : FUColors.bgHover)
                     .frame(width: 32, height: 32)
+                    .overlay(
+                        Circle()
+                            .stroke(isActive ? Color.clear : FUColors.border, lineWidth: 1)
+                    )
                 
                 Text("\(number)")
-                    .font(.headline)
-                    .foregroundStyle(isActive ? .white : .secondary)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(isActive ? Color.white : FUColors.textTertiary)
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.headline)
-                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isActive ? FUColors.textPrimary : FUColors.textSecondary)
                 
                 Text(description)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(FUColors.textTertiary)
             }
         }
         .padding(.vertical, 4)
     }
 }
 
-/// Compact permission status indicator
+/// Compact permission status indicator — dark themed
 struct PermissionStatusBadge: View {
     let status: PermissionStatus
     
     private var color: Color {
         switch status {
-        case .granted: return .green
-        case .denied: return .orange
-        case .notDetermined: return .yellow
-        case .restricted: return .red
+        case .granted: return FUColors.developerColor
+        case .denied: return FUColors.cacheColor
+        case .notDetermined: return FUColors.cacheColor.opacity(0.7)
+        case .restricted: return FUColors.danger
         }
     }
     
@@ -261,8 +329,8 @@ struct PermissionStatusBadge: View {
                 .frame(width: 8, height: 8)
             
             Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(FUColors.textSecondary)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
@@ -279,6 +347,7 @@ struct PermissionStatusBadge: View {
         onOpenSettings: {},
         onDismiss: {}
     )
+    .preferredColorScheme(.dark)
 }
 
 #Preview("Granted") {
@@ -287,6 +356,7 @@ struct PermissionStatusBadge: View {
         onOpenSettings: {},
         onDismiss: {}
     )
+    .preferredColorScheme(.dark)
 }
 
 #Preview("Denied") {
@@ -295,4 +365,5 @@ struct PermissionStatusBadge: View {
         onOpenSettings: {},
         onDismiss: {}
     )
+    .preferredColorScheme(.dark)
 }

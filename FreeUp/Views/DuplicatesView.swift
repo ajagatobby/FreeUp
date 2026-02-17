@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// View for browsing and managing duplicate file groups
+/// View for browsing and managing duplicate file groups — dark themed
 struct DuplicatesView: View {
     @Bindable var viewModel: ScanViewModel
     @State private var searchText = ""
@@ -57,85 +57,131 @@ struct DuplicatesView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            DuplicatesHeader(
-                totalGroups: viewModel.duplicateGroups.count,
-                totalDuplicates: viewModel.totalDuplicateCount,
-                wastedSpace: viewModel.duplicateWastedSpace,
-                selectedCount: selectedForDeletion.count,
-                selectedSize: totalSelectedSize
-            )
-            
-            Divider()
-            
-            if filteredGroups.isEmpty {
-                ContentUnavailableView(
-                    searchText.isEmpty ? "No Duplicates Found" : "No Results",
-                    systemImage: searchText.isEmpty ? "checkmark.circle" : "magnifyingglass",
-                    description: Text(searchText.isEmpty ? "Great! No duplicate files were found on your system." : "Try a different search term")
-                )
-            } else {
-                // Duplicate groups list
-                List {
-                    ForEach(filteredGroups) { group in
-                        DuplicateGroupRow(
-                            group: group,
-                            selectedForDeletion: $selectedForDeletion,
-                            isExpanded: expandedGroups.contains(group.id),
-                            onToggleExpand: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    if expandedGroups.contains(group.id) {
-                                        expandedGroups.remove(group.id)
-                                    } else {
-                                        expandedGroups.insert(group.id)
-                                    }
-                                }
-                            }
-                        )
-                    }
-                }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
-            }
-            
-            // Bottom action bar
-            if !selectedForDeletion.isEmpty {
-                DuplicateActionBar(
+        ZStack {
+            FUColors.bg
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header
+                DuplicatesHeader(
+                    totalGroups: viewModel.duplicateGroups.count,
+                    totalDuplicates: viewModel.totalDuplicateCount,
+                    wastedSpace: viewModel.duplicateWastedSpace,
                     selectedCount: selectedForDeletion.count,
-                    selectedSize: totalSelectedSize,
-                    isDeleting: viewModel.isDeletingFiles,
-                    onDelete: {
-                        showDeleteConfirmation = true
-                    },
-                    onAutoSelect: {
-                        autoSelectDuplicates()
-                    },
-                    onDeselect: {
-                        selectedForDeletion.removeAll()
-                    }
+                    selectedSize: totalSelectedSize
                 )
-            } else {
-                // Show auto-select button when nothing is selected
-                HStack {
-                    Spacer()
-                    
-                    Button {
-                        autoSelectDuplicates()
-                    } label: {
-                        Label("Auto-Select Duplicates", systemImage: "wand.and.stars")
+                
+                // Thin separator
+                Rectangle()
+                    .fill(FUColors.border)
+                    .frame(height: 1)
+                
+                if filteredGroups.isEmpty {
+                    // Empty state
+                    VStack(spacing: 16) {
+                        Spacer()
+
+                        ZStack {
+                            Circle()
+                                .fill(FUColors.accentDim)
+                                .frame(width: 64, height: 64)
+
+                            Image(systemName: searchText.isEmpty ? "checkmark.circle" : "magnifyingglass")
+                                .font(.system(size: 26))
+                                .foregroundStyle(FUColors.accent)
+                        }
+
+                        Text(searchText.isEmpty ? "No Duplicates Found" : "No Results")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(FUColors.textPrimary)
+
+                        Text(searchText.isEmpty
+                             ? "Great! No duplicate files were found on your system."
+                             : "Try a different search term")
+                            .font(.system(size: 13))
+                            .foregroundStyle(FUColors.textSecondary)
+                            .multilineTextAlignment(.center)
+
+                        Spacer()
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.teal)
-                    .help("Automatically select duplicate copies, keeping the oldest file in each group")
-                    
-                    Spacer()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    // Duplicate groups list
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(filteredGroups) { group in
+                                DuplicateGroupRow(
+                                    group: group,
+                                    selectedForDeletion: $selectedForDeletion,
+                                    isExpanded: expandedGroups.contains(group.id),
+                                    onToggleExpand: {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            if expandedGroups.contains(group.id) {
+                                                expandedGroups.remove(group.id)
+                                            } else {
+                                                expandedGroups.insert(group.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    }
+                    .scrollContentBackground(.hidden)
                 }
-                .padding()
-                .background(.ultraThinMaterial)
+                
+                // Bottom action bar
+                if !selectedForDeletion.isEmpty {
+                    DuplicateActionBar(
+                        selectedCount: selectedForDeletion.count,
+                        selectedSize: totalSelectedSize,
+                        isDeleting: viewModel.isDeletingFiles,
+                        onDelete: {
+                            showDeleteConfirmation = true
+                        },
+                        onAutoSelect: {
+                            autoSelectDuplicates()
+                        },
+                        onDeselect: {
+                            selectedForDeletion.removeAll()
+                        }
+                    )
+                } else {
+                    // Show auto-select button when nothing is selected
+                    HStack {
+                        Spacer()
+                        
+                        Button {
+                            autoSelectDuplicates()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Auto-Select Duplicates")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(FUColors.accentGradient)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Automatically select duplicate copies, keeping the oldest file in each group")
+                        
+                        Spacer()
+                    }
+                    .padding(.vertical, 14)
+                    .background(FUColors.bgElevated)
+                }
             }
         }
         .navigationTitle("Duplicates")
+        .toolbarBackground(FUColors.bg, for: .windowToolbar)
         .searchable(text: $searchText, prompt: "Search duplicates")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -167,7 +213,10 @@ struct DuplicatesView: View {
                     }
                 } label: {
                     Label("Sort", systemImage: "arrow.up.arrow.down")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(FUColors.textSecondary)
                 }
+                .menuStyle(.borderlessButton)
             }
         }
         .alert("Delete Duplicates", isPresented: $showDeleteConfirmation) {
@@ -242,31 +291,31 @@ struct DuplicatesHeader: View {
     var body: some View {
         HStack {
             ZStack {
-                Circle()
-                    .fill(Color.teal.opacity(0.15))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(FUColors.duplicatesColor.opacity(0.12))
                     .frame(width: 50, height: 50)
                 
                 Image(systemName: "doc.on.doc")
-                    .font(.title2)
-                    .foregroundStyle(.teal)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(FUColors.duplicatesColor)
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(totalGroups) duplicate groups")
-                    .font(.headline)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(FUColors.textPrimary)
                 
                 HStack(spacing: 8) {
                     Text("\(totalDuplicates) extra copies")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(FUColors.textSecondary)
                     
                     Text("~")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(FUColors.textTertiary)
                     
                     Text(ByteFormatter.format(wastedSpace) + " wasted")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.teal)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(FUColors.duplicatesColor)
                 }
             }
             
@@ -275,17 +324,17 @@ struct DuplicatesHeader: View {
             if selectedCount > 0 {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("\(selectedCount) selected")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(FUColors.textSecondary)
                     
                     Text(ByteFormatter.format(selectedSize))
-                        .font(.headline)
-                        .foregroundStyle(Color.accentColor)
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(FUColors.accent)
                 }
             }
         }
-        .padding()
-        .background(Color(.windowBackgroundColor))
+        .padding(16)
+        .background(FUColors.bgElevated)
     }
 }
 
@@ -297,49 +346,50 @@ struct DuplicateGroupRow: View {
     let isExpanded: Bool
     let onToggleExpand: () -> Void
     
+    @State private var isHovered = false
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Group header
             Button(action: onToggleExpand) {
                 HStack(spacing: 12) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(FUColors.textTertiary)
                         .frame(width: 12)
                     
                     // File icon
                     ZStack {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.teal.opacity(0.15))
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(FUColors.duplicatesColor.opacity(0.12))
                             .frame(width: 36, height: 36)
                         
                         Image(systemName: "doc.on.doc.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.teal)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(FUColors.duplicatesColor)
                     }
                     
                     VStack(alignment: .leading, spacing: 2) {
                         Text(group.files.first?.fileName ?? "Unknown")
-                            .font(.body)
-                            .fontWeight(.medium)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(FUColors.textPrimary)
                             .lineLimit(1)
                         
                         Text("\(group.files.count) copies")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(FUColors.textSecondary)
                     }
                     
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(ByteFormatter.format(group.wastedSpace))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.teal)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(FUColors.duplicatesColor)
                         
                         Text("wasted")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(FUColors.textTertiary)
                     }
                 }
             }
@@ -372,7 +422,21 @@ struct DuplicateGroupRow: View {
                 .padding(.leading, 24)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHovered ? FUColors.bgHover : FUColors.bgCard)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(FUColors.border, lineWidth: 1)
+        )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
@@ -385,38 +449,40 @@ struct DuplicateFileRow: View {
     let onToggle: () -> Void
     let onRevealInFinder: () -> Void
     
+    @State private var isHovered = false
+    
     var body: some View {
         HStack(spacing: 10) {
             // Selection checkbox
             Button(action: onToggle) {
                 Image(systemName: isSelectedForDeletion ? "checkmark.circle.fill" : "circle")
-                    .font(.body)
-                    .foregroundStyle(isSelectedForDeletion ? Color.red : .secondary)
+                    .font(.system(size: 15))
+                    .foregroundStyle(isSelectedForDeletion ? FUColors.danger : FUColors.textTertiary)
             }
             .buttonStyle(.plain)
             
             // Original badge or copy indicator
             if isOriginal {
                 Text("Keep")
-                    .font(.caption2)
-                    .fontWeight(.bold)
+                    .font(.system(size: 10, weight: .bold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(
-                        Capsule().fill(Color.green.opacity(0.2))
+                        Capsule().fill(FUColors.developerColor.opacity(0.15))
                     )
-                    .foregroundStyle(.green)
+                    .foregroundStyle(FUColors.developerColor)
             }
             
             // File path
             VStack(alignment: .leading, spacing: 1) {
                 Text(file.fileName)
-                    .font(.subheadline)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(FUColors.textPrimary)
                     .lineLimit(1)
                 
                 Text(file.parentPath)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10))
+                    .foregroundStyle(FUColors.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.head)
             }
@@ -425,15 +491,14 @@ struct DuplicateFileRow: View {
             
             // Size
             Text(ByteFormatter.format(file.allocatedSize))
-                .font(.caption)
-                .fontWeight(.medium)
-                .monospacedDigit()
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(FUColors.textSecondary)
             
-            // Context menu
+            // Reveal in Finder
             Button(action: onRevealInFinder) {
                 Image(systemName: "folder")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(isHovered ? FUColors.accent : FUColors.textTertiary)
             }
             .buttonStyle(.plain)
             .help("Reveal in Finder")
@@ -441,9 +506,14 @@ struct DuplicateFileRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelectedForDeletion ? Color.red.opacity(0.08) : Color.clear)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSelectedForDeletion ? FUColors.dangerDim : (isHovered ? FUColors.bgHover : Color.clear))
         )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
@@ -461,11 +531,12 @@ struct DuplicateActionBar: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(selectedCount) duplicates selected")
-                    .font(.headline)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(FUColors.textPrimary)
                 
                 Text(ByteFormatter.format(selectedSize) + " to free")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(FUColors.textSecondary)
             }
             
             Spacer()
@@ -473,21 +544,45 @@ struct DuplicateActionBar: View {
             if isDeleting {
                 ProgressView()
                     .scaleEffect(0.8)
+                    .tint(FUColors.accent)
                     .padding(.horizontal)
             }
             
             Button("Deselect All", action: onDeselect)
-                .buttonStyle(.bordered)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(FUColors.textSecondary)
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(FUColors.bgHover)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(FUColors.border, lineWidth: 1)
+                        )
+                )
             
             Button(action: onDelete) {
-                Label("Delete Duplicates", systemImage: "trash")
+                HStack(spacing: 6) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Delete Duplicates")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(FUColors.danger)
+                )
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
+            .buttonStyle(.plain)
             .disabled(isDeleting)
         }
-        .padding()
-        .background(.ultraThinMaterial)
+        .padding(16)
+        .background(FUColors.bgElevated)
     }
 }
 
@@ -495,4 +590,5 @@ struct DuplicateActionBar: View {
     NavigationStack {
         DuplicatesView(viewModel: ScanViewModel())
     }
+    .preferredColorScheme(.dark)
 }

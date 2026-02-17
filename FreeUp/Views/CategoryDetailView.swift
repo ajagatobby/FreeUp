@@ -53,8 +53,6 @@ struct CategoryDetailView: View {
     /// Max files to show per section (pagination)
     private let pageSize = 200
 
-    private var categoryColor: Color { category.color }
-
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -63,20 +61,22 @@ struct CategoryDetailView: View {
                 totalFiles: totalFileCount,
                 totalSize: totalSize,
                 selectedCount: localSelectedCount,
-                selectedSize: localSelectedSize,
-                color: categoryColor
+                selectedSize: localSelectedSize
             )
 
             Divider()
+                .overlay(FUColors.border)
 
             if isLoading {
                 VStack(spacing: 12) {
                     ProgressView()
+                        .tint(FUColors.textSecondary)
                     Text("Loading files...")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(FUColors.textSecondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(FUColors.bg)
             } else if displayFlatFiles.isEmpty && displayGroups.isEmpty {
                 ContentUnavailableView(
                     searchText.isEmpty ? "No Files" : "No Results",
@@ -85,8 +85,10 @@ struct CategoryDetailView: View {
                 )
             } else if hasMultipleSources {
                 groupedListView
+                    .background(FUColors.bg)
             } else {
                 flatListView
+                    .background(FUColors.bg)
             }
 
             // Bottom action bar
@@ -107,6 +109,7 @@ struct CategoryDetailView: View {
                 )
             }
         }
+        .background(FUColors.bg)
         .navigationTitle(category.rawValue)
         .searchable(text: $searchText, prompt: "Search files")
         .toolbar {
@@ -133,13 +136,13 @@ struct CategoryDetailView: View {
                 ForEach(displayGroups) { group in
                     Section {
                         if expandedSections.contains(group.source) {
-                            ForEach(group.previewFiles) { file in
-                                fileRow(for: file)
+                            ForEach(Array(group.previewFiles.enumerated()), id: \.element.id) { index, file in
+                                fileRow(for: file, index: index)
                             }
                             if group.fileCount > group.previewFiles.count {
                                 Text("\(group.fileCount - group.previewFiles.count) more files...")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(FUColors.textTertiary)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 8)
                             }
@@ -150,7 +153,7 @@ struct CategoryDetailView: View {
                             fileCount: group.fileCount,
                             totalSize: group.totalSize,
                             isCollapsed: !expandedSections.contains(group.source),
-                            color: categoryColor,
+                            color: category.themeColor,
                             onToggle: {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     if expandedSections.contains(group.source) {
@@ -164,7 +167,7 @@ struct CategoryDetailView: View {
                                 selectFiles(ids: group.allFileIDs, files: group.previewFiles)
                             }
                         )
-                        .background(Color(.windowBackgroundColor))
+                        .background(FUColors.bgElevated)
                     }
                 }
             }
@@ -177,8 +180,8 @@ struct CategoryDetailView: View {
     private var flatListView: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(displayFlatFiles) { file in
-                    fileRow(for: file)
+                ForEach(Array(displayFlatFiles.enumerated()), id: \.element.id) { index, file in
+                    fileRow(for: file, index: index)
                 }
             }
             .padding(.horizontal, 8)
@@ -188,7 +191,7 @@ struct CategoryDetailView: View {
     // MARK: - File Row
 
     @ViewBuilder
-    private func fileRow(for file: ScannedFileInfo) -> some View {
+    private func fileRow(for file: ScannedFileInfo, index: Int) -> some View {
         let isSelected = viewModel.selectedItems.contains(file.id)
         let isClone = file.fileContentIdentifier != nil
 
@@ -196,6 +199,7 @@ struct CategoryDetailView: View {
             file: file,
             isSelected: isSelected,
             isClone: isClone,
+            index: index,
             onToggleSelection: {
                 toggleSelection(file: file)
             },
@@ -446,26 +450,28 @@ struct CategoryHeader: View {
     let totalSize: Int64
     let selectedCount: Int
     let selectedSize: Int64
-    let color: Color
+
+    private var themeColor: Color { category.themeColor }
 
     var body: some View {
         HStack {
             ZStack {
-                Circle()
-                    .fill(color.opacity(0.15))
-                    .frame(width: 50, height: 50)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(themeColor.opacity(0.12))
+                    .frame(width: 44, height: 44)
                 Image(systemName: category.iconName)
                     .font(.title2)
-                    .foregroundStyle(color)
+                    .foregroundStyle(themeColor)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(totalFiles) files")
                     .font(.headline)
+                    .foregroundStyle(FUColors.textPrimary)
                 Text(ByteFormatter.format(totalSize))
                     .font(.title2)
                     .fontWeight(.bold)
-                    .foregroundStyle(color)
+                    .foregroundStyle(themeColor)
             }
 
             Spacer()
@@ -474,15 +480,15 @@ struct CategoryHeader: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("\(selectedCount) selected")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(FUColors.textSecondary)
                     Text(ByteFormatter.format(selectedSize))
                         .font(.headline)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(FUColors.accent)
                 }
             }
         }
         .padding()
-        .background(Color(.windowBackgroundColor))
+        .background(FUColors.bgElevated)
     }
 }
 
@@ -503,11 +509,11 @@ struct SourceSectionHeader: View {
                 HStack(spacing: 8) {
                     Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(FUColors.textTertiary)
                         .frame(width: 12)
                     Text(source)
                         .font(.headline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(FUColors.textPrimary)
                 }
             }
             .buttonStyle(.plain)
@@ -516,7 +522,7 @@ struct SourceSectionHeader: View {
 
             Text("\(fileCount) files")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(FUColors.textSecondary)
 
             Text(ByteFormatter.format(totalSize))
                 .font(.subheadline)
@@ -528,13 +534,14 @@ struct SourceSectionHeader: View {
             } label: {
                 Image(systemName: "checkmark.circle")
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(FUColors.textSecondary)
             }
             .buttonStyle(.plain)
             .help("Select all in \(source)")
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 4)
+        .background(FUColors.bgElevated)
     }
 }
 
@@ -552,9 +559,10 @@ struct SelectionActionBar: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(selectedCount) items selected")
                     .font(.headline)
+                    .foregroundStyle(FUColors.textPrimary)
                 Text(ByteFormatter.format(selectedSize))
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(FUColors.textSecondary)
             }
 
             Spacer()
@@ -567,6 +575,7 @@ struct SelectionActionBar: View {
 
             Button("Deselect", action: onDeselect)
                 .buttonStyle(.bordered)
+                .tint(FUColors.textSecondary)
 
             Button(action: onDelete) {
                 Label("Move to Trash", systemImage: "trash")
@@ -576,6 +585,10 @@ struct SelectionActionBar: View {
             .disabled(isDeleting)
         }
         .padding()
-        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            FUColors.border
+                .frame(height: 1)
+        }
+        .background(FUColors.bgCard)
     }
 }
