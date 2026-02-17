@@ -238,7 +238,6 @@ struct DashboardView: View {
                 } else {
                     CategoryDetailView(
                         category: category,
-                        files: viewModel.files(for: category),
                         viewModel: viewModel
                     )
                 }

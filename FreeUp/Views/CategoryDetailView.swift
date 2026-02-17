@@ -9,96 +9,100 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-// MARK: - Lightweight display model (avoids re-sorting on every render)
+// MARK: - Lightweight display model
 
-/// Pre-computed group for display — built once, not per-render
-private struct DisplayGroup: Identifiable {
-    let id: String // source name
+/// Pre-computed group for display — built once off main thread, not per-render
+private struct DisplayGroup: Identifiable, Sendable {
+    let id: String
     let source: String
-    let files: [ScannedFileInfo]
+    let fileCount: Int
     let totalSize: Int64
+    /// Only the top N files for display — avoids holding 20k structs in view state
+    let previewFiles: [ScannedFileInfo]
+    /// All file IDs in this group (for select-all, lightweight)
+    let allFileIDs: [UUID]
 }
 
-/// Detail view for a specific file category
-/// Uses ScrollView + LazyVStack for performance with large file lists.
-/// Sections are collapsed by default so SwiftUI never has to diff 20k+ rows.
+/// Detail view for a specific file category.
+/// Performance strategy:
+/// - Don't accept a files array prop (avoids 20k element copy on navigation)
+/// - Sort/group off main thread via Task
+/// - Track selection count incrementally, not by iterating all files
+/// - Show only top 200 files per section; load more on demand
 struct CategoryDetailView: View {
     let category: FileCategory
-    let files: [ScannedFileInfo]
     @Bindable var viewModel: ScanViewModel
 
     @State private var sortOrder: SortOrder = .sizeDescending
     @State private var searchText = ""
     @State private var showCloneWarning = false
-    /// All sections collapsed by default — critical for performance
     @State private var expandedSections: Set<String> = []
 
-    // Cached computed data — rebuilt only when inputs change
-    @State private var cachedGroups: [DisplayGroup] = []
-    @State private var cachedFlatFiles: [ScannedFileInfo] = []
-    @State private var cachedHasMultipleSources = false
-    @State private var cachedTotalSize: Int64 = 0
+    // Pre-computed display data (built off main thread)
+    @State private var displayGroups: [DisplayGroup] = []
+    @State private var displayFlatFiles: [ScannedFileInfo] = []
+    @State private var hasMultipleSources = false
+    @State private var totalFileCount: Int = 0
+    @State private var totalSize: Int64 = 0
+    @State private var isLoading = true
+
+    // Selection tracking — updated incrementally, NOT by iterating all files
+    @State private var localSelectedCount: Int = 0
+    @State private var localSelectedSize: Int64 = 0
+
+    /// Max files to show per section (pagination)
+    private let pageSize = 200
 
     private var categoryColor: Color { category.color }
-
-    /// Selected count / size — iterates only the (smaller) selected set, not all files
-    private var selectedCount: Int {
-        guard !viewModel.selectedItems.isEmpty else { return 0 }
-        let fileIDs = Set(files.lazy.map(\.id))
-        return viewModel.selectedItems.filter { fileIDs.contains($0) }.count
-    }
-
-    private var selectedSize: Int64 {
-        guard !viewModel.selectedItems.isEmpty else { return 0 }
-        var size: Int64 = 0
-        for file in files {
-            if viewModel.selectedItems.contains(file.id) {
-                size += file.allocatedSize
-            }
-        }
-        return size
-    }
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
             CategoryHeader(
                 category: category,
-                totalFiles: files.count,
-                totalSize: cachedTotalSize,
-                selectedCount: selectedCount,
-                selectedSize: selectedSize,
+                totalFiles: totalFileCount,
+                totalSize: totalSize,
+                selectedCount: localSelectedCount,
+                selectedSize: localSelectedSize,
                 color: categoryColor
             )
 
             Divider()
 
-            // File list
-            if cachedFlatFiles.isEmpty && cachedGroups.isEmpty {
+            if isLoading {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading files...")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if displayFlatFiles.isEmpty && displayGroups.isEmpty {
                 ContentUnavailableView(
                     searchText.isEmpty ? "No Files" : "No Results",
                     systemImage: searchText.isEmpty ? "folder" : "magnifyingglass",
                     description: Text(searchText.isEmpty ? "No files found in this category" : "Try a different search term")
                 )
-            } else if cachedHasMultipleSources {
+            } else if hasMultipleSources {
                 groupedListView
             } else {
                 flatListView
             }
 
             // Bottom action bar
-            if selectedCount > 0 {
+            if localSelectedCount > 0 {
                 SelectionActionBar(
-                    selectedCount: selectedCount,
-                    selectedSize: selectedSize,
+                    selectedCount: localSelectedCount,
+                    selectedSize: localSelectedSize,
                     isDeleting: viewModel.isDeletingFiles,
                     onDelete: {
                         Task {
                             await viewModel.deleteSelectedFiles(from: category)
+                            recomputeSelectionFromScratch()
                         }
                     },
                     onDeselect: {
-                        viewModel.deselectAllFiles(in: category)
+                        deselectAll()
                     }
                 )
             }
@@ -116,27 +120,34 @@ struct CategoryDetailView: View {
         } message: {
             Text("This file appears to be an APFS clone. Deleting it may not free disk space if other files share the same data blocks.")
         }
-        .onAppear { rebuildCache() }
-        .onChange(of: sortOrder) { rebuildCache() }
-        .onChange(of: searchText) { rebuildCache() }
+        .task(id: SortSearchKey(sort: sortOrder, search: searchText)) {
+            await rebuildDisplayData()
+        }
     }
 
-    // MARK: - Grouped List (sections collapsed by default)
+    // MARK: - Grouped List
 
     private var groupedListView: some View {
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
-                ForEach(cachedGroups) { group in
+                ForEach(displayGroups) { group in
                     Section {
                         if expandedSections.contains(group.source) {
-                            ForEach(group.files) { file in
+                            ForEach(group.previewFiles) { file in
                                 fileRow(for: file)
+                            }
+                            if group.fileCount > group.previewFiles.count {
+                                Text("\(group.fileCount - group.previewFiles.count) more files...")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
                             }
                         }
                     } header: {
                         SourceSectionHeader(
                             source: group.source,
-                            fileCount: group.files.count,
+                            fileCount: group.fileCount,
                             totalSize: group.totalSize,
                             isCollapsed: !expandedSections.contains(group.source),
                             color: categoryColor,
@@ -150,9 +161,7 @@ struct CategoryDetailView: View {
                                 }
                             },
                             onSelectAll: {
-                                for file in group.files {
-                                    viewModel.selectedItems.insert(file.id)
-                                }
+                                selectFiles(ids: group.allFileIDs, files: group.previewFiles)
                             }
                         )
                         .background(Color(.windowBackgroundColor))
@@ -168,7 +177,7 @@ struct CategoryDetailView: View {
     private var flatListView: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(cachedFlatFiles) { file in
+                ForEach(displayFlatFiles) { file in
                     fileRow(for: file)
                 }
             }
@@ -188,20 +197,77 @@ struct CategoryDetailView: View {
             isSelected: isSelected,
             isClone: isClone,
             onToggleSelection: {
-                if viewModel.selectedItems.contains(file.id) {
-                    viewModel.selectedItems.remove(file.id)
-                } else {
-                    viewModel.selectedItems.insert(file.id)
-                    if isClone {
-                        showCloneWarning = true
-                    }
-                }
+                toggleSelection(file: file)
             },
             onRevealInFinder: {
                 NSWorkspace.shared.selectFile(file.url.path, inFileViewerRootedAtPath: file.parentPath)
             }
         )
         .equatable()
+    }
+
+    // MARK: - Selection (incremental — O(1) per toggle, not O(n))
+
+    private func toggleSelection(file: ScannedFileInfo) {
+        if viewModel.selectedItems.contains(file.id) {
+            viewModel.selectedItems.remove(file.id)
+            localSelectedCount -= 1
+            localSelectedSize -= file.allocatedSize
+        } else {
+            viewModel.selectedItems.insert(file.id)
+            localSelectedCount += 1
+            localSelectedSize += file.allocatedSize
+            if file.fileContentIdentifier != nil {
+                showCloneWarning = true
+            }
+        }
+    }
+
+    private func selectFiles(ids: [UUID], files: [ScannedFileInfo]) {
+        // Build new set in one shot, then assign (single @Observable mutation)
+        var updated = viewModel.selectedItems
+        for id in ids {
+            updated.insert(id)
+        }
+        viewModel.selectedItems = updated
+        recomputeSelectionFromScratch()
+    }
+
+    private func selectAll() {
+        let allFiles = viewModel.files(for: category)
+        var updated = viewModel.selectedItems
+        for file in allFiles {
+            updated.insert(file.id)
+        }
+        viewModel.selectedItems = updated
+        localSelectedCount = allFiles.count
+        localSelectedSize = allFiles.reduce(0) { $0 + $1.allocatedSize }
+    }
+
+    private func deselectAll() {
+        let allFiles = viewModel.files(for: category)
+        var updated = viewModel.selectedItems
+        for file in allFiles {
+            updated.remove(file.id)
+        }
+        viewModel.selectedItems = updated
+        localSelectedCount = 0
+        localSelectedSize = 0
+    }
+
+    /// Full recompute — only called after deletion or bulk select where incremental is impractical
+    private func recomputeSelectionFromScratch() {
+        let allFiles = viewModel.files(for: category)
+        var count = 0
+        var size: Int64 = 0
+        for file in allFiles {
+            if viewModel.selectedItems.contains(file.id) {
+                count += 1
+                size += file.allocatedSize
+            }
+        }
+        localSelectedCount = count
+        localSelectedSize = size
     }
 
     // MARK: - Toolbar
@@ -239,72 +305,108 @@ struct CategoryDetailView: View {
 
     private var selectAllButton: some View {
         Button {
-            if selectedCount == files.count {
-                viewModel.deselectAllFiles(in: category)
+            if localSelectedCount == totalFileCount {
+                deselectAll()
             } else {
-                viewModel.selectAllFiles(in: category)
+                selectAll()
             }
         } label: {
             Label(
-                selectedCount == files.count ? "Deselect All" : "Select All",
-                systemImage: selectedCount == files.count ? "checkmark.circle" : "circle"
+                localSelectedCount == totalFileCount ? "Deselect All" : "Select All",
+                systemImage: localSelectedCount == totalFileCount ? "checkmark.circle" : "circle"
             )
         }
     }
 
-    // MARK: - Cache Rebuild (only on sort/search change, not per-render)
+    // MARK: - Build display data OFF main thread
 
-    private func rebuildCache() {
-        var filtered = files
+    private func rebuildDisplayData() async {
+        isLoading = true
 
-        // Search filter
-        if !searchText.isEmpty {
-            let query = searchText
-            filtered = filtered.filter {
-                $0.fileName.localizedCaseInsensitiveContains(query) ||
-                $0.parentPath.localizedCaseInsensitiveContains(query) ||
-                ($0.source?.localizedCaseInsensitiveContains(query) ?? false)
+        let cat = category
+        let sort = sortOrder
+        let query = searchText
+        let limit = pageSize
+
+        // Read files from viewModel (on main actor since viewModel is @MainActor)
+        let allFiles = viewModel.files(for: cat)
+
+        // Do ALL heavy work off main thread
+        let result: (
+            groups: [DisplayGroup],
+            flat: [ScannedFileInfo],
+            multi: Bool,
+            count: Int,
+            size: Int64
+        ) = await Task.detached(priority: .userInitiated) {
+            var filtered = allFiles
+
+            // Search filter
+            if !query.isEmpty {
+                filtered = filtered.filter {
+                    $0.fileName.localizedCaseInsensitiveContains(query) ||
+                    $0.parentPath.localizedCaseInsensitiveContains(query) ||
+                    ($0.source?.localizedCaseInsensitiveContains(query) ?? false)
+                }
             }
-        }
 
-        // Sort
-        filtered = sortFiles(filtered)
+            let totalCount = filtered.count
+            var totalSize: Int64 = 0
+            for f in filtered { totalSize += f.allocatedSize }
 
-        // Check for multiple sources
-        var sourceSet = Set<String>()
-        for f in filtered {
-            sourceSet.insert(f.source ?? "Other")
-            if sourceSet.count > 1 { break }
-        }
-        let hasMultiple = sourceSet.count > 1
-
-        cachedTotalSize = filtered.reduce(0) { $0 + $1.allocatedSize }
-        cachedHasMultipleSources = hasMultiple
-
-        if hasMultiple {
-            // Build groups
-            var groups: [String: [ScannedFileInfo]] = [:]
-            for file in filtered {
-                let source = file.source ?? "Other"
-                groups[source, default: []].append(file)
+            // Check for multiple sources (early exit)
+            var sourceSet = Set<String>()
+            for f in filtered {
+                sourceSet.insert(f.source ?? "Other")
+                if sourceSet.count > 1 { break }
             }
-            cachedGroups = groups.map { key, value in
-                DisplayGroup(
-                    id: key,
-                    source: key,
-                    files: value,
-                    totalSize: value.reduce(0) { $0 + $1.allocatedSize }
-                )
-            }.sorted { $0.totalSize > $1.totalSize }
-            cachedFlatFiles = []
-        } else {
-            cachedFlatFiles = filtered
-            cachedGroups = []
-        }
+            let hasMultiple = sourceSet.count > 1
+
+            if hasMultiple {
+                // Group by source
+                var groups: [String: [ScannedFileInfo]] = [:]
+                for file in filtered {
+                    let source = file.source ?? "Other"
+                    groups[source, default: []].append(file)
+                }
+
+                let displayGroups: [DisplayGroup] = groups.map { key, value in
+                    // Sort within group
+                    let sorted = Self.sortFiles(value, by: sort)
+                    let preview = Array(sorted.prefix(limit))
+                    let groupSize = value.reduce(0 as Int64) { $0 + $1.allocatedSize }
+                    let allIDs = value.map(\.id)
+                    return DisplayGroup(
+                        id: key, source: key,
+                        fileCount: value.count, totalSize: groupSize,
+                        previewFiles: preview, allFileIDs: allIDs
+                    )
+                }.sorted { $0.totalSize > $1.totalSize }
+
+                return (displayGroups, [], true, totalCount, totalSize)
+            } else {
+                // Flat — sort and take first page
+                let sorted = Self.sortFiles(filtered, by: sort)
+                let page = Array(sorted.prefix(limit))
+                return ([], page, false, totalCount, totalSize)
+            }
+        }.value
+
+        // Single main-thread update
+        displayGroups = result.groups
+        displayFlatFiles = result.flat
+        hasMultipleSources = result.multi
+        totalFileCount = result.count
+        totalSize = result.size
+        isLoading = false
+
+        // Recompute selection state from current viewModel
+        recomputeSelectionFromScratch()
     }
 
-    private func sortFiles(_ files: [ScannedFileInfo]) -> [ScannedFileInfo] {
-        switch sortOrder {
+    /// Sort files — nonisolated static so it can run on any thread
+    private nonisolated static func sortFiles(_ files: [ScannedFileInfo], by order: SortOrder) -> [ScannedFileInfo] {
+        switch order {
         case .sizeDescending:
             return files.sorted { $0.allocatedSize > $1.allocatedSize }
         case .sizeAscending:
@@ -321,9 +423,16 @@ struct CategoryDetailView: View {
     }
 }
 
+// MARK: - Sort/Search Key for .task(id:)
+
+private struct SortSearchKey: Equatable {
+    let sort: SortOrder
+    let search: String
+}
+
 // MARK: - Sort Order
 
-enum SortOrder {
+enum SortOrder: Equatable {
     case sizeDescending, sizeAscending
     case nameAscending, nameDescending
     case dateOldest, dateNewest

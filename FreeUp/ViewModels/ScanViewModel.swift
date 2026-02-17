@@ -330,16 +330,21 @@ final class ScanViewModel {
     
     func selectAllFiles(in category: FileCategory) {
         let files = scannedFiles[category] ?? []
+        // Build locally, assign once (single @Observable notification)
+        var updated = selectedItems
         for file in files {
-            selectedItems.insert(file.id)
+            updated.insert(file.id)
         }
+        selectedItems = updated
     }
     
     func deselectAllFiles(in category: FileCategory) {
         let files = scannedFiles[category] ?? []
+        var updated = selectedItems
         for file in files {
-            selectedItems.remove(file.id)
+            updated.remove(file.id)
         }
+        selectedItems = updated
     }
     
     // MARK: - Batch File Processing (Fix #2 + #3)
