@@ -71,7 +71,54 @@ struct DuplicatesView: View {
                     selectedSize: totalSelectedSize
                 )
                 
-                // Thin separator
+                // Inline toolbar: search + sort
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 11))
+                            .foregroundStyle(FUColors.textTertiary)
+                        TextField("Search duplicates...", text: $searchText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12))
+                            .foregroundStyle(FUColors.textPrimary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(FUColors.bgCard)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(FUColors.border, lineWidth: 1)
+                            )
+                    )
+
+                    Menu {
+                        Section("Sort By") {
+                            Button { sortOrder = .sizeDescending } label: {
+                                Label("Largest Waste First", systemImage: sortOrder == .sizeDescending ? "checkmark" : "")
+                            }
+                            Button { sortOrder = .sizeAscending } label: {
+                                Label("Smallest Waste First", systemImage: sortOrder == .sizeAscending ? "checkmark" : "")
+                            }
+                            Button { sortOrder = .countDescending } label: {
+                                Label("Most Copies First", systemImage: sortOrder == .countDescending ? "checkmark" : "")
+                            }
+                            Button { sortOrder = .nameAscending } label: {
+                                Label("Name A-Z", systemImage: sortOrder == .nameAscending ? "checkmark" : "")
+                            }
+                        }
+                    } label: {
+                        Label("Sort", systemImage: "arrow.up.arrow.down")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(FUColors.textSecondary)
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(FUColors.bgElevated)
+
                 Rectangle()
                     .fill(FUColors.border)
                     .frame(height: 1)
@@ -178,45 +225,6 @@ struct DuplicatesView: View {
                     .padding(.vertical, 14)
                     .background(FUColors.bgElevated)
                 }
-            }
-        }
-        .navigationTitle("Duplicates")
-        .toolbarBackground(FUColors.bg, for: .windowToolbar)
-        .searchable(text: $searchText, prompt: "Search duplicates")
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Menu {
-                    Section("Sort By") {
-                        Button {
-                            sortOrder = .sizeDescending
-                        } label: {
-                            Label("Largest Waste First", systemImage: sortOrder == .sizeDescending ? "checkmark" : "")
-                        }
-                        
-                        Button {
-                            sortOrder = .sizeAscending
-                        } label: {
-                            Label("Smallest Waste First", systemImage: sortOrder == .sizeAscending ? "checkmark" : "")
-                        }
-                        
-                        Button {
-                            sortOrder = .countDescending
-                        } label: {
-                            Label("Most Copies First", systemImage: sortOrder == .countDescending ? "checkmark" : "")
-                        }
-                        
-                        Button {
-                            sortOrder = .nameAscending
-                        } label: {
-                            Label("Name A-Z", systemImage: sortOrder == .nameAscending ? "checkmark" : "")
-                        }
-                    }
-                } label: {
-                    Label("Sort", systemImage: "arrow.up.arrow.down")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(FUColors.textSecondary)
-                }
-                .menuStyle(.borderlessButton)
             }
         }
         .alert("Delete Duplicates", isPresented: $showDeleteConfirmation) {

@@ -7,11 +7,11 @@
 
 import SwiftUI
 
-/// Premium dark-themed category card for the dashboard grid.
-struct CategoryCard: View {
+/// Compact sidebar row for a file category — used in the left sidebar.
+struct SidebarCategoryRow: View {
     let category: FileCategory
     let stats: CategoryDisplayStats?
-    let isScanning: Bool
+    let isSelected: Bool
     let action: () -> Void
 
     @State private var isHovered = false
@@ -20,83 +20,55 @@ struct CategoryCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                // --- Icon badge ---
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(themeColor.opacity(0.12))
-                    .frame(width: 38, height: 38)
+            HStack(spacing: 10) {
+                // Icon
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(themeColor.opacity(isSelected ? 0.20 : 0.10))
+                    .frame(width: 30, height: 30)
                     .overlay(
                         Image(systemName: category.iconName)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(themeColor)
                     )
 
-                Spacer(minLength: 0)
-
-                // --- Category name ---
+                // Name
                 Text(category.rawValue)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(FUColors.textPrimary)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? FUColors.textPrimary : FUColors.textSecondary)
                     .lineLimit(1)
 
-                // --- Size + count ---
+                Spacer(minLength: 4)
+
+                // Size badge
                 if let stats {
                     Text(ByteFormatter.format(stats.totalSize))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(themeColor)
-                        .lineLimit(1)
-
-                    Text("\(stats.formattedCount) items")
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(FUColors.textSecondary)
-                        .lineLimit(1)
-                } else if isScanning {
-                    scanningPlaceholder
-                } else {
-                    Text("No items")
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(FUColors.textSecondary)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(isSelected ? themeColor : FUColors.textTertiary)
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 130)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isHovered ? FUColors.bgHover : FUColors.bgCard)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? themeColor.opacity(0.10)
+                            : (isHovered ? FUColors.bgHover : Color.clear)
+                    )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(
-                        isHovered ? themeColor.opacity(0.20) : FUColors.border,
+                        isSelected ? themeColor.opacity(0.20) : Color.clear,
                         lineWidth: 1
                     )
             )
-            .shadow(
-                color: isHovered ? themeColor.opacity(0.10) : .black.opacity(0.15),
-                radius: isHovered ? 12 : 4,
-                y: isHovered ? 4 : 2
-            )
-            .offset(y: isHovered ? -2 : 0)
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(.easeInOut(duration: 0.12)) {
                 isHovered = hovering
             }
-        }
-    }
-
-    // MARK: - Scanning placeholder
-
-    @ViewBuilder
-    private var scanningPlaceholder: some View {
-        HStack(spacing: 6) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Scanning...")
-                .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(FUColors.textSecondary)
         }
     }
 }

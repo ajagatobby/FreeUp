@@ -83,7 +83,7 @@ struct FreeUpApp: App {
         }
         .modelContainer(sharedModelContainer)
         .windowStyle(.automatic)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             // File menu commands
             CommandGroup(replacing: .newItem) {

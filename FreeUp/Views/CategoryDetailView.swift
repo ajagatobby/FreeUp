@@ -64,8 +64,42 @@ struct CategoryDetailView: View {
                 selectedSize: localSelectedSize
             )
 
-            Divider()
-                .overlay(FUColors.border)
+            // Inline toolbar: search + sort + select all
+            HStack(spacing: 8) {
+                // Search field
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(FUColors.textTertiary)
+                    TextField("Search files...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundStyle(FUColors.textPrimary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(FUColors.bgCard)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(FUColors.border, lineWidth: 1)
+                        )
+                )
+
+                sortMenu
+                    .font(.system(size: 11, weight: .medium))
+
+                selectAllButton
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(FUColors.bgElevated)
+
+            Rectangle()
+                .fill(FUColors.border)
+                .frame(height: 1)
 
             if isLoading {
                 VStack(spacing: 12) {
@@ -110,14 +144,6 @@ struct CategoryDetailView: View {
             }
         }
         .background(FUColors.bg)
-        .navigationTitle(category.rawValue)
-        .searchable(text: $searchText, prompt: "Search files")
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                sortMenu
-                selectAllButton
-            }
-        }
         .alert("Clone Warning", isPresented: $showCloneWarning) {
             Button("OK") { }
         } message: {
