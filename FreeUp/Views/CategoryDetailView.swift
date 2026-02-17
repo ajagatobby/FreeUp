@@ -101,29 +101,32 @@ struct CategoryDetailView: View {
                 .fill(FUColors.border)
                 .frame(height: 1)
 
-            if isLoading {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .tint(FUColors.textSecondary)
-                    Text("Loading files...")
-                        .font(.subheadline)
-                        .foregroundStyle(FUColors.textSecondary)
+            // Scrollable content area — fills all remaining space below the fixed header
+            Group {
+                if isLoading {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(FUColors.textSecondary)
+                        Text("Loading files...")
+                            .font(.subheadline)
+                            .foregroundStyle(FUColors.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if displayFlatFiles.isEmpty && displayGroups.isEmpty {
+                    ContentUnavailableView(
+                        searchText.isEmpty ? "No Files" : "No Results",
+                        systemImage: searchText.isEmpty ? "folder" : "magnifyingglass",
+                        description: Text(searchText.isEmpty ? "No files found in this category" : "Try a different search term")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if hasMultipleSources {
+                    groupedListView
+                } else {
+                    flatListView
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(FUColors.bg)
-            } else if displayFlatFiles.isEmpty && displayGroups.isEmpty {
-                ContentUnavailableView(
-                    searchText.isEmpty ? "No Files" : "No Results",
-                    systemImage: searchText.isEmpty ? "folder" : "magnifyingglass",
-                    description: Text(searchText.isEmpty ? "No files found in this category" : "Try a different search term")
-                )
-            } else if hasMultipleSources {
-                groupedListView
-                    .background(FUColors.bg)
-            } else {
-                flatListView
-                    .background(FUColors.bg)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(FUColors.bg)
 
             // Bottom action bar
             if localSelectedCount > 0 {

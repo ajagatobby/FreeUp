@@ -171,10 +171,20 @@ struct DashboardView: View {
             // Category list
             ScrollView {
                 LazyVStack(spacing: 2) {
+                    // Home row — always visible, returns to overview
+                    SidebarHomeRow(
+                        isSelected: selectedCategory == nil,
+                        action: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                selectedCategory = nil
+                            }
+                        }
+                    )
+
                     if sortedCategories.isEmpty && !isScanning {
                         // Empty state
                         VStack(spacing: 8) {
-                            Spacer().frame(height: 40)
+                            Spacer().frame(height: 24)
                             Image(systemName: "magnifyingglass")
                                 .font(.system(size: 20))
                                 .foregroundStyle(FUColors.textTertiary)
@@ -184,6 +194,16 @@ struct DashboardView: View {
                         }
                         .frame(maxWidth: .infinity)
                     } else {
+                        // Section label
+                        Text("CATEGORIES")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(FUColors.textTertiary)
+                            .tracking(0.5)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 8)
+                            .padding(.bottom, 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
                         ForEach(sortedCategories) { category in
                             SidebarCategoryRow(
                                 category: category,
@@ -323,10 +343,14 @@ struct DashboardView: View {
                 )
             } else if let category = selectedCategory {
                 // Show category detail or duplicates
+                // .id(category) forces SwiftUI to destroy/recreate the view when
+                // the selected category changes, resetting all @State properly.
                 if category == .duplicates {
                     DuplicatesView(viewModel: viewModel)
+                        .id(category)
                 } else {
                     CategoryDetailView(category: category, viewModel: viewModel)
+                        .id(category)
                 }
             } else {
                 // Hero / overview pane
@@ -511,6 +535,59 @@ struct DashboardView: View {
         formatter.allowedUnits = [.minute, .second]
         formatter.unitsStyle = .abbreviated
         return formatter.string(from: duration) ?? ""
+    }
+}
+
+// MARK: - Sidebar Home Row
+
+struct SidebarHomeRow: View {
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(FUColors.accent.opacity(isSelected ? 0.20 : 0.10))
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        Image(systemName: "house.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(FUColors.accent)
+                    )
+
+                Text("Home")
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? FUColors.textPrimary : FUColors.textSecondary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? FUColors.accent.opacity(0.10)
+                            : (isHovered ? FUColors.bgHover : Color.clear)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(
+                        isSelected ? FUColors.accent.opacity(0.20) : Color.clear,
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
