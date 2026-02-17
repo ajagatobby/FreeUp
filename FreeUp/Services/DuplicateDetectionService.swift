@@ -68,7 +68,7 @@ struct DuplicateDetectionProgress: Sendable {
 // MARK: - Fast Hex Conversion
 
 /// Pre-computed hex lookup table for fast SHA256 -> hex string conversion
-private nonisolated(unsafe) let hexLookup: [UInt8] = Array("0123456789abcdef".utf8)
+nonisolated(unsafe) private let hexLookup: [UInt8] = Array("0123456789abcdef".utf8)
 
 /// Convert SHA256 digest to hex string without String(format:) overhead
 @inline(__always)
@@ -122,8 +122,8 @@ private nonisolated func computeFullHashStatic(for url: URL) -> String? {
 /// 5. Group by full hash to identify exact duplicates
 actor DuplicateDetectionService {
     
-    /// Minimum file size to consider for duplicate detection (skip tiny files)
-    private let minimumFileSize: Int64 = 4096 // 4KB
+    /// Minimum file size to consider for duplicate detection (skip small files)
+    private let minimumFileSize: Int64 = 102_400 // 100KB - small files aren't worth the hashing cost
     
     /// Size of partial hash sample (first N bytes)
     private let partialHashSize: Int = 4096 // 4KB
@@ -146,7 +146,11 @@ actor DuplicateDetectionService {
         from files: [ScannedFileInfo]
     ) -> AsyncStream<DuplicateDetectionProgress> {
         AsyncStream { continuation in
-            Task {
+            Task { [weak self] in
+                guard let self else {
+                    continuation.finish()
+                    return
+                }
                 await self.resetCancellation()
                 await self.performDetection(files: files, continuation: continuation)
             }
@@ -210,17 +214,36 @@ actor DuplicateDetectionService {
         var partialHashGroups: [String: [ScannedFileInfo]] = [:]
         var hashesCompleted = 0
         
-        // Process in parallel chunks using TaskGroup
+        // Process in parallel with concurrency limit to avoid file handle exhaustion
+        let maxConcurrency = 8
         await withTaskGroup(of: (String, ScannedFileInfo)?.self) { group in
+            var submitted = 0
+            
             for (fileSize, file) in allCandidates {
+                // Limit in-flight tasks to avoid opening thousands of FileHandles
+                if submitted >= maxConcurrency {
+                    if let result = await group.next() {
+                        if isCancelled { break }
+                        if let (key, file) = result {
+                            if partialHashGroups[key] == nil {
+                                partialHashGroups[key] = []
+                            }
+                            partialHashGroups[key]!.append(file)
+                        }
+                        hashesCompleted += 1
+                    }
+                }
+                
                 group.addTask {
                     guard let hash = computePartialHashStatic(for: file.url, size: hashSize) else {
                         return nil
                     }
                     return ("\(fileSize)_\(hash)", file)
                 }
+                submitted += 1
             }
             
+            // Drain remaining results
             for await result in group {
                 if isCancelled { break }
                 
@@ -256,13 +279,31 @@ actor DuplicateDetectionService {
         var fullHashCompleted = 0
         
         await withTaskGroup(of: (String, ScannedFileInfo)?.self) { group in
+            var submitted = 0
+            
             for file in fullCandidates {
+                // Limit concurrency for full hashing (these read entire files)
+                if submitted >= maxConcurrency {
+                    if let result = await group.next() {
+                        if isCancelled { break }
+                        if let (hash, file) = result {
+                            if fullHashGroups[hash] == nil {
+                                fullHashGroups[hash] = []
+                            }
+                            fullHashGroups[hash]!.append(file)
+                        }
+                        fullHashCompleted += 1
+                    }
+                }
+                
                 group.addTask {
                     guard let hash = computeFullHashStatic(for: file.url) else { return nil }
                     return (hash, file)
                 }
+                submitted += 1
             }
             
+            // Drain remaining
             for await result in group {
                 if isCancelled { break }
                 

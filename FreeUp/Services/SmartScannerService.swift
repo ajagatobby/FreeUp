@@ -177,33 +177,14 @@ actor SmartScannerService {
             description: "iOS Backups"
         ))
         
-        // ============ LANGUAGE MODEL DATA ============
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Caches/com.apple.LanguageModeling"),
-            category: .cache,
-            description: "Language Models"
-        ))
+        // NOTE: Language Models (Caches/com.apple.LanguageModeling) is already covered
+        // by the ~/Library/Caches target. Spotlight Index is system-managed and should
+        // not be offered for deletion.
         
-        // ============ SPOTLIGHT ============
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Metadata/CoreSpotlight"),
-            category: .cache,
-            description: "Spotlight Index"
-        ))
-        
-        // ============ APPLICATION SUPPORT (orphaned data) ============
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Application Support"),
-            category: .orphanedAppData,
-            description: "App Support Data"
-        ))
-        
-        // ============ CONTAINERS ============
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Containers"),
-            category: .cache,
-            description: "App Containers"
-        ))
+        // NOTE: ~/Library/Application Support and ~/Library/Containers are intentionally
+        // NOT scanned here. They contain active app data (often 100k+ files, multi-GB)
+        // and scanning them causes 99% CPU, 3+ GB memory, and multi-minute stalls.
+        // Orphaned app detection should use a shallow top-level-only approach instead.
         
         return targets
     }
@@ -260,7 +241,7 @@ actor SmartScannerService {
                 totalFiles += count
                 totalSize += size
                 
-                if await self.isCancelled {
+                if self.isCancelled {
                     continuation.yield(.error(.cancelled))
                     continuation.finish()
                     return

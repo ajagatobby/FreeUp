@@ -48,15 +48,7 @@ struct ScannedFileInfo: Sendable, Identifiable {
         isPurgeable: Bool,
         source: String?
     ) {
-        // Generate stable UUID from path hash once
-        let hash = url.path.hashValue
-        let uuidString = String(format: "%08X-%04X-%04X-%04X-%012X",
-                               UInt32(truncatingIfNeeded: hash),
-                               UInt16(truncatingIfNeeded: hash >> 32),
-                               UInt16(truncatingIfNeeded: hash >> 48),
-                               UInt16(truncatingIfNeeded: hash >> 16),
-                               UInt64(truncatingIfNeeded: hash))
-        self.id = UUID(uuidString: uuidString) ?? UUID()
+        self.id = UUID()
         self.url = url
         self.allocatedSize = allocatedSize
         self.fileSize = fileSize
@@ -66,8 +58,15 @@ struct ScannedFileInfo: Sendable, Identifiable {
         self.fileContentIdentifier = fileContentIdentifier
         self.isPurgeable = isPurgeable
         self.source = source
-        self.fileName = url.lastPathComponent
-        self.parentPath = url.deletingLastPathComponent().path
+        // Compute fileName/parentPath from path string directly (avoids URL object creation)
+        let path = url.path
+        if let lastSlash = path.lastIndex(of: "/") {
+            self.fileName = String(path[path.index(after: lastSlash)...])
+            self.parentPath = String(path[..<lastSlash])
+        } else {
+            self.fileName = path
+            self.parentPath = ""
+        }
     }
 }
 

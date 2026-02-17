@@ -150,7 +150,7 @@ final class ScanViewModel {
         let scannerName: String
         
         if let customDirectory = directory {
-            if await ultraScanner.canUseBSDAPIs(for: customDirectory) {
+            if ultraScanner.canUseBSDAPIs(for: customDirectory) {
                 scanStream = await ultraScanner.scan(directory: customDirectory)
                 scannerName = "UltraScanner"
             } else {
@@ -190,11 +190,8 @@ final class ScanViewModel {
                 // Rebuild sub-category stats cache
                 rebuildSubCategoryStatsCache()
                 
-                // Detect duplicates (runs once, stores result)
+                // Detect duplicates (runs once, stores result) — only for user content categories
                 await detectDuplicates()
-                
-                // Filter orphaned app data (off main thread)
-                await filterOrphanedAppData()
                 
                 let totalDuration = CFAbsoluteTimeGetCurrent() - startTime
                 scanState = .completed(totalFiles: totalFilesScanned, totalSize: totalSizeScanned, duration: totalDuration)
@@ -452,12 +449,11 @@ final class ScanViewModel {
     
     private func flushAPFSRegistrations() async {
         guard !pendingAPFSIdentifiers.isEmpty else { return }
-        let identifiers = pendingAPFSIdentifiers
+        let batch = pendingAPFSIdentifiers.map { (identifier: $0.0, path: $0.1) }
         pendingAPFSIdentifiers = []
         
-        for (identifier, path) in identifiers {
-            await apfsService.registerFileIdentifier(identifier, for: path)
-        }
+        // Single actor call instead of serial await per-registration
+        await apfsService.registerFiles(batch)
     }
     
     // MARK: - Sub-Category Stats Cache (Fix #7)
@@ -485,18 +481,20 @@ final class ScanViewModel {
     // MARK: - Duplicate Detection (Fix #1 -- runs once, retrieves stored result)
     
     private func detectDuplicates() async {
-        scanState = .detectingDuplicates(progress: 0)
-        
-        let excludedCategories: Set<FileCategory> = [.cache, .logs, .systemJunk]
+        // Only check categories where duplicates are meaningful and actionable
+        let duplicateCategories: Set<FileCategory> = [.downloads, .documents, .videos, .photos, .audio]
         var allFiles: [ScannedFileInfo] = []
         
         for (category, files) in scannedFiles {
-            if !excludedCategories.contains(category) {
+            if duplicateCategories.contains(category) {
                 allFiles.append(contentsOf: files)
             }
         }
         
-        guard allFiles.count > 1 else { return }
+        // Skip entirely if too few files to have meaningful duplicates
+        guard allFiles.count > 10 else { return }
+        
+        scanState = .detectingDuplicates(progress: 0)
         
         // Run detection with progress (stores result internally)
         for await progress in await duplicateService.detectDuplicates(from: allFiles) {
