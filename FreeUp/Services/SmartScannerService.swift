@@ -47,6 +47,8 @@ actor SmartScannerService {
         var targets: [ScanTarget] = []
         
         // ============ CACHE (typically largest) ============
+        // Scan ~/Library/Caches with smart source detection (sub-categorizes by app)
+        // NOTE: Do NOT add individual browser cache targets -- they overlap with this
         targets.append(ScanTarget(
             url: library.appendingPathComponent("Caches"),
             category: .cache,
@@ -56,32 +58,6 @@ actor SmartScannerService {
             url: URL(fileURLWithPath: "/Library/Caches"),
             category: .cache,
             description: "System Caches"
-        ))
-        // Browser-specific caches
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Caches/com.apple.Safari"),
-            category: .cache,
-            description: "Safari Cache"
-        ))
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Caches/Google/Chrome"),
-            category: .cache,
-            description: "Chrome Cache"
-        ))
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Caches/Firefox"),
-            category: .cache,
-            description: "Firefox Cache"
-        ))
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Caches/com.microsoft.Edge"),
-            category: .cache,
-            description: "Edge Cache"
-        ))
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Caches/com.brave.Browser"),
-            category: .cache,
-            description: "Brave Cache"
         ))
         
         // ============ LOGS ============
@@ -179,16 +155,8 @@ actor SmartScannerService {
             category: .developerFiles,
             description: "Android SDK"
         ))
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Caches/CocoaPods"),
-            category: .developerFiles,
-            description: "CocoaPods Cache"
-        ))
-        targets.append(ScanTarget(
-            url: library.appendingPathComponent("Caches/Homebrew"),
-            category: .developerFiles,
-            description: "Homebrew Cache"
-        ))
+        // NOTE: CocoaPods Cache and Homebrew Cache are under ~/Library/Caches
+        // and already covered by the general Caches target. Don't duplicate.
         
         // ============ DOWNLOADS ============
         targets.append(ScanTarget(

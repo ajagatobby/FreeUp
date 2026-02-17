@@ -19,7 +19,9 @@ enum ScanResult: Sendable {
 }
 
 /// Lightweight struct for streaming (not persisted)
-struct ScannedFileInfo: Sendable, Equatable {
+struct ScannedFileInfo: Sendable, Identifiable {
+    /// Stable identity derived from file path hash (computed once at init, not per-access)
+    nonisolated let id: UUID
     let url: URL
     let allocatedSize: Int64
     let fileSize: Int64
@@ -30,9 +32,55 @@ struct ScannedFileInfo: Sendable, Equatable {
     let isPurgeable: Bool
     /// Source identifier for sub-categorization (e.g., "Safari Cache", "Chrome Cache")
     let source: String?
+    /// Pre-computed file name (avoids repeated URL decomposition)
+    let fileName: String
+    /// Pre-computed parent path (avoids repeated URL decomposition)
+    let parentPath: String
     
-    var fileName: String { url.lastPathComponent }
-    var parentPath: String { url.deletingLastPathComponent().path }
+    nonisolated init(
+        url: URL,
+        allocatedSize: Int64,
+        fileSize: Int64,
+        contentType: UTType?,
+        category: FileCategory,
+        lastAccessDate: Date?,
+        fileContentIdentifier: Int64?,
+        isPurgeable: Bool,
+        source: String?
+    ) {
+        // Generate stable UUID from path hash once
+        let hash = url.path.hashValue
+        let uuidString = String(format: "%08X-%04X-%04X-%04X-%012X",
+                               UInt32(truncatingIfNeeded: hash),
+                               UInt16(truncatingIfNeeded: hash >> 32),
+                               UInt16(truncatingIfNeeded: hash >> 48),
+                               UInt16(truncatingIfNeeded: hash >> 16),
+                               UInt64(truncatingIfNeeded: hash))
+        self.id = UUID(uuidString: uuidString) ?? UUID()
+        self.url = url
+        self.allocatedSize = allocatedSize
+        self.fileSize = fileSize
+        self.contentType = contentType
+        self.category = category
+        self.lastAccessDate = lastAccessDate
+        self.fileContentIdentifier = fileContentIdentifier
+        self.isPurgeable = isPurgeable
+        self.source = source
+        self.fileName = url.lastPathComponent
+        self.parentPath = url.deletingLastPathComponent().path
+    }
+}
+
+extension ScannedFileInfo: Equatable {
+    nonisolated static func == (lhs: ScannedFileInfo, rhs: ScannedFileInfo) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+extension ScannedFileInfo: Hashable {
+    nonisolated func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
 }
 
 /// Scanning errors

@@ -36,7 +36,6 @@ enum ScanState: Equatable {
 }
 
 /// Main view model for scanning operations
-/// Uses SmartScannerService for CleanMyMac-level speed (targets known junk locations only)
 @MainActor
 @Observable
 final class ScanViewModel {
@@ -57,6 +56,9 @@ final class ScanViewModel {
     /// Detected duplicate file groups
     private(set) var duplicateGroups: [DuplicateGroup] = []
     
+    /// Cached sub-category stats (recomputed only when scannedFiles changes)
+    private(set) var cachedSubCategoryStats: [FileCategory: [(source: String, count: Int, totalSize: Int64)]] = [:]
+    
     /// Selected items for deletion
     var selectedItems: Set<UUID> = []
     
@@ -69,29 +71,22 @@ final class ScanViewModel {
     
     // MARK: - Services
     
-    /// Lightning-fast scanner targeting known junk locations - PRIMARY (CleanMyMac-style)
     private let smartScanner = SmartScannerService()
-    
-    /// Ultra-fast scanner using BSD APIs - for custom directory scans
     private let ultraScanner = UltraScannerService()
-    
-    /// High-performance scanner using FileManager - FALLBACK
     private let turboScanner = TurboScannerService()
-    
-    /// Standard scanner - SECONDARY FALLBACK
     private let standardScanner = ScannerService()
-    
-    /// APFS service for clone detection and snapshots
     private let apfsService = APFSService()
-    
-    /// Permission service
     private let permissionService = PermissionService()
-    
-    /// Duplicate detection service
     private let duplicateService = DuplicateDetectionService()
-    
-    /// Deletion service
     private let deletionService = DeletionService()
+    
+    // MARK: - Throttle State
+    
+    /// Last reported progress value for throttling UI updates
+    private var lastReportedProgress: Double = 0
+    
+    /// Pending APFS identifiers to batch-register
+    private var pendingAPFSIdentifiers: [(Int64, String)] = []
     
     // MARK: - Computed Properties
     
@@ -108,12 +103,10 @@ final class ScanViewModel {
         return false
     }
     
-    /// Total wasted space from duplicates
     var duplicateWastedSpace: Int64 {
         duplicateGroups.reduce(0) { $0 + $1.wastedSpace }
     }
     
-    /// Total number of duplicate files (excluding originals)
     var totalDuplicateCount: Int {
         duplicateGroups.reduce(0) { $0 + $1.duplicateCount }
     }
@@ -131,7 +124,6 @@ final class ScanViewModel {
     
     // MARK: - Public Methods
     
-    /// Start a scan - uses SmartScanner for system cleanup, UltraScanner for custom directories
     func startScan(directory: URL? = nil) async {
         // Reset state
         scanState = .scanning(progress: 0, currentDirectory: nil)
@@ -141,58 +133,49 @@ final class ScanViewModel {
         scannedFiles = [:]
         selectedItems = []
         duplicateGroups = []
+        cachedSubCategoryStats = [:]
+        lastReportedProgress = 0
+        pendingAPFSIdentifiers = []
         
-        // Clear APFS cache
         await apfsService.clearCache()
-        
-        // Get volume info
         volumeInfo = await apfsService.getVolumeInfo()
         
-        // Check for snapshots (async, non-blocking)
         Task {
             snapshotWarning = await apfsService.snapshotWarning
         }
         
         let startTime = CFAbsoluteTimeGetCurrent()
         
-        // Choose scanner based on whether a specific directory is provided
         let scanStream: AsyncStream<ScanResult>
         let scannerName: String
         
         if let customDirectory = directory {
-            // Custom directory scan - use UltraScanner or TurboScanner
             if await ultraScanner.canUseBSDAPIs(for: customDirectory) {
                 scanStream = await ultraScanner.scan(directory: customDirectory)
                 scannerName = "UltraScanner"
-                print("Using UltraScanner for custom directory: \(customDirectory.path)")
             } else {
                 scanStream = await turboScanner.scan(directory: customDirectory)
                 scannerName = "TurboScanner"
-                print("Using TurboScanner for custom directory: \(customDirectory.path)")
             }
         } else {
-            // Default system scan - use SmartScanner for CleanMyMac-level speed
             scanStream = await smartScanner.scan()
             scannerName = "SmartScanner"
-            print("Using SmartScanner (targeting known junk locations)")
         }
         
-        // Process scan results
         for await result in scanStream {
             switch result {
             case .batch(let files):
                 processBatch(files)
                 
             case .progress(let file):
-                processFile(file)
+                processSingleFile(file)
                 
             case .directoryStarted(let url):
                 let relativePath = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-                scanState = .scanning(progress: estimateProgress(), currentDirectory: relativePath)
+                updateProgressThrottled(currentDirectory: relativePath)
                 
             case .directoryCompleted(_, fileCount: _, totalSize: _):
-                // Update progress estimation
-                scanState = .scanning(progress: estimateProgress(), currentDirectory: nil)
+                updateProgressThrottled(currentDirectory: nil)
                 
             case .error(let error):
                 handleError(error)
@@ -201,11 +184,17 @@ final class ScanViewModel {
                 let duration = CFAbsoluteTimeGetCurrent() - startTime
                 print("\(scannerName) completed: \(files) files, \(ByteFormatter.format(size)) in \(String(format: "%.2f", duration))s")
                 
-                // Now detect duplicates
+                // Flush pending APFS registrations
+                await flushAPFSRegistrations()
+                
+                // Rebuild sub-category stats cache
+                rebuildSubCategoryStatsCache()
+                
+                // Detect duplicates (runs once, stores result)
                 await detectDuplicates()
                 
-                // Filter orphaned app data (check if apps are still installed)
-                filterOrphanedAppData()
+                // Filter orphaned app data (off main thread)
+                await filterOrphanedAppData()
                 
                 let totalDuration = CFAbsoluteTimeGetCurrent() - startTime
                 scanState = .completed(totalFiles: totalFilesScanned, totalSize: totalSizeScanned, duration: totalDuration)
@@ -213,7 +202,6 @@ final class ScanViewModel {
         }
     }
     
-    /// Cancel the current scan
     func cancelScan() {
         Task {
             await smartScanner.cancel()
@@ -225,41 +213,25 @@ final class ScanViewModel {
         scanState = .idle
     }
     
-    /// Get files for a specific category
     func files(for category: FileCategory) -> [ScannedFileInfo] {
         return scannedFiles[category] ?? []
     }
     
-    /// Get sub-category stats for a category (grouped by source)
+    /// Get sub-category stats from cache (O(1) lookup, not recomputed per call)
     func subCategoryStats(for category: FileCategory) -> [(source: String, count: Int, totalSize: Int64)] {
-        let files = scannedFiles[category] ?? []
-        var groups: [String: (count: Int, size: Int64)] = [:]
-        
-        for file in files {
-            let source = file.source ?? "Other"
-            var current = groups[source] ?? (0, 0)
-            current.count += 1
-            current.size += file.allocatedSize
-            groups[source] = current
-        }
-        
-        return groups.map { (source: $0.key, count: $0.value.count, totalSize: $0.value.size) }
-            .sorted { $0.totalSize > $1.totalSize }
+        return cachedSubCategoryStats[category] ?? []
     }
     
-    /// Check permissions status
     func checkPermissions() {
         fullDiskAccessStatus = permissionService.checkFullDiskAccess()
     }
     
-    /// Open Full Disk Access settings
     func openFullDiskAccessSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
             NSWorkspace.shared.open(url)
         }
     }
     
-    /// Select a directory using open panel
     func selectDirectory() async -> URL? {
         await withCheckedContinuation { continuation in
             DispatchQueue.main.async {
@@ -282,23 +254,17 @@ final class ScanViewModel {
     
     // MARK: - Deletion Methods
     
-    /// Delete selected files
     func deleteSelectedFiles(from category: FileCategory) async {
         let files = scannedFiles[category] ?? []
-        let selectedFiles = files.filter { file in
-            let id = generateId(for: file)
-            return selectedItems.contains(id)
-        }
-        
+        let selectedFiles = files.filter { selectedItems.contains($0.id) }
         guard !selectedFiles.isEmpty else { return }
         
         isDeletingFiles = true
-        
         let result = await deletionService.deleteFilesSync(selectedFiles, mode: currentDeleteMode)
         
-        // Remove deleted files from our data
         if result.successCount > 0 {
             removeDeletedFiles(selectedFiles, from: category)
+            rebuildSubCategoryStatsCache()
         }
         
         lastDeletionResult = result
@@ -306,7 +272,6 @@ final class ScanViewModel {
         isDeletingFiles = false
     }
     
-    /// Delete all reclaimable files (cache, logs, system junk, developer files)
     func cleanUpReclaimableFiles() async {
         let reclaimableCategories: [FileCategory] = [.cache, .logs, .systemJunk]
         var allFiles: [ScannedFileInfo] = []
@@ -316,17 +281,16 @@ final class ScanViewModel {
         }
         
         guard !allFiles.isEmpty else { return }
-        
         isDeletingFiles = true
         
         let result = await deletionService.deleteFilesSync(allFiles, mode: currentDeleteMode)
         
-        // Remove deleted files
         if result.successCount > 0 {
             for category in reclaimableCategories {
                 let categoryFiles = scannedFiles[category] ?? []
                 removeDeletedFiles(categoryFiles, from: category)
             }
+            rebuildSubCategoryStatsCache()
         }
         
         lastDeletionResult = result
@@ -334,37 +298,27 @@ final class ScanViewModel {
         isDeletingFiles = false
     }
     
-    /// Delete specific files (used by DuplicatesView)
     func deleteFiles(_ files: [ScannedFileInfo]) async {
         guard !files.isEmpty else { return }
-        
         isDeletingFiles = true
         
         let result = await deletionService.deleteFilesSync(files, mode: currentDeleteMode)
         
-        // Remove from duplicate groups and scanned files
         if result.successCount > 0 {
             let deletedURLs = Set(files.map { $0.url })
             
-            // Update duplicate groups
             duplicateGroups = duplicateGroups.compactMap { group in
                 let remaining = group.files.filter { !deletedURLs.contains($0.url) }
-                if remaining.count <= 1 { return nil } // No longer a duplicate group
-                return DuplicateGroup(
-                    id: group.id,
-                    hash: group.hash,
-                    fileSize: group.fileSize,
-                    files: remaining
-                )
+                if remaining.count <= 1 { return nil }
+                return DuplicateGroup(id: group.id, hash: group.hash, fileSize: group.fileSize, files: remaining)
             }
             
-            // Update category stats for duplicates
             updateDuplicateStats()
             
-            // Also remove from original categories
             for file in files {
                 removeDeletedFiles([file], from: file.category)
             }
+            rebuildSubCategoryStatsCache()
         }
         
         lastDeletionResult = result
@@ -372,75 +326,107 @@ final class ScanViewModel {
         isDeletingFiles = false
     }
     
-    /// Dismiss deletion result
     func dismissDeletionResult() {
         showDeletionResult = false
         lastDeletionResult = nil
     }
     
-    /// Select all files in a category
     func selectAllFiles(in category: FileCategory) {
         let files = scannedFiles[category] ?? []
         for file in files {
-            let id = generateId(for: file)
-            selectedItems.insert(id)
+            selectedItems.insert(file.id)
         }
     }
     
-    /// Deselect all files in a category
     func deselectAllFiles(in category: FileCategory) {
         let files = scannedFiles[category] ?? []
         for file in files {
-            let id = generateId(for: file)
-            selectedItems.remove(id)
+            selectedItems.remove(file.id)
         }
     }
     
-    /// Generate consistent UUID from file URL
-    func generateId(for file: ScannedFileInfo) -> UUID {
-        let hash = file.url.path.hashValue
-        let uuidString = String(format: "%08X-%04X-%04X-%04X-%012X",
-                               UInt32(truncatingIfNeeded: hash),
-                               UInt16(truncatingIfNeeded: hash >> 32),
-                               UInt16(truncatingIfNeeded: hash >> 48),
-                               UInt16(truncatingIfNeeded: hash >> 16),
-                               UInt64(truncatingIfNeeded: hash))
-        return UUID(uuidString: uuidString) ?? UUID()
-    }
+    // MARK: - Batch File Processing (Fix #2 + #3)
     
-    // MARK: - Private Methods
-    
+    /// Process a batch of files with a SINGLE Observable mutation (not per-file)
     private func processBatch(_ files: [ScannedFileInfo]) {
+        // Accumulate batch totals locally (no @Observable overhead)
+        var batchSize: Int64 = 0
+        var batchCategoryUpdates: [FileCategory: [ScannedFileInfo]] = [:]
+        var batchStats: [FileCategory: (count: Int, size: Int64)] = [:]
+        var batchAPFS: [(Int64, String)] = []
+        
         for file in files {
-            processFile(file)
+            batchSize += file.allocatedSize
+            
+            // Accumulate into local dictionary (no COW on scannedFiles)
+            if batchCategoryUpdates[file.category] == nil {
+                batchCategoryUpdates[file.category] = []
+            }
+            batchCategoryUpdates[file.category]!.append(file)
+            
+            var stats = batchStats[file.category] ?? (0, 0)
+            stats.count += 1
+            stats.size += file.allocatedSize
+            batchStats[file.category] = stats
+            
+            if let identifier = file.fileContentIdentifier {
+                batchAPFS.append((identifier, file.url.path))
+            }
         }
         
-        // Update state periodically (not on every file for performance)
-        if totalFilesScanned % 1000 == 0 {
-            scanState = .scanning(progress: estimateProgress(), currentDirectory: nil)
+        // Single mutation of @Observable properties
+        totalFilesScanned += files.count
+        totalSizeScanned += batchSize
+        
+        // In-place array append (avoids COW by using subscript directly)
+        for (cat, newFiles) in batchCategoryUpdates {
+            if scannedFiles[cat] == nil {
+                scannedFiles[cat] = []
+            }
+            scannedFiles[cat]!.append(contentsOf: newFiles)
+            
+            var existingStats = categoryStats[cat] ?? CategoryStats(count: 0, totalSize: 0)
+            existingStats.count += batchStats[cat]!.count
+            existingStats.totalSize += batchStats[cat]!.size
+            categoryStats[cat] = existingStats
         }
+        
+        // Batch APFS registrations
+        pendingAPFSIdentifiers.append(contentsOf: batchAPFS)
+        
+        // Throttled UI update
+        updateProgressThrottled(currentDirectory: nil)
     }
     
-    private func processFile(_ file: ScannedFileInfo) {
+    /// Process a single file (fallback for .progress events)
+    private func processSingleFile(_ file: ScannedFileInfo) {
         totalFilesScanned += 1
         totalSizeScanned += file.allocatedSize
         
-        // Update category stats
         var stats = categoryStats[file.category] ?? CategoryStats(count: 0, totalSize: 0)
         stats.count += 1
         stats.totalSize += file.allocatedSize
         categoryStats[file.category] = stats
         
-        // Store file reference
-        var categoryFiles = scannedFiles[file.category] ?? []
-        categoryFiles.append(file)
-        scannedFiles[file.category] = categoryFiles
+        // In-place append (avoids COW)
+        if scannedFiles[file.category] == nil {
+            scannedFiles[file.category] = []
+        }
+        scannedFiles[file.category]!.append(file)
         
-        // Register for clone detection
         if let identifier = file.fileContentIdentifier {
-            Task {
-                await apfsService.registerFileIdentifier(identifier, for: file.url.path)
-            }
+            pendingAPFSIdentifiers.append((identifier, file.url.path))
+        }
+    }
+    
+    // MARK: - Throttled Progress Updates (Fix #18)
+    
+    private func updateProgressThrottled(currentDirectory: String?) {
+        let newProgress = estimateProgress()
+        // Only update UI when progress changes by > 1%
+        if abs(newProgress - lastReportedProgress) > 0.01 {
+            scanState = .scanning(progress: newProgress, currentDirectory: currentDirectory)
+            lastReportedProgress = newProgress
         }
     }
     
@@ -458,19 +444,49 @@ final class ScanViewModel {
     }
     
     private func estimateProgress() -> Double {
-        // Rough progress estimation based on typical home directory size
-        // Most home directories are 10-100K files
         let estimatedTotal = 50_000.0
         return min(0.99, Double(totalFilesScanned) / estimatedTotal)
     }
     
-    // MARK: - Duplicate Detection
+    // MARK: - Batch APFS Registration (Fix #17)
+    
+    private func flushAPFSRegistrations() async {
+        guard !pendingAPFSIdentifiers.isEmpty else { return }
+        let identifiers = pendingAPFSIdentifiers
+        pendingAPFSIdentifiers = []
+        
+        for (identifier, path) in identifiers {
+            await apfsService.registerFileIdentifier(identifier, for: path)
+        }
+    }
+    
+    // MARK: - Sub-Category Stats Cache (Fix #7)
+    
+    private func rebuildSubCategoryStatsCache() {
+        var cache: [FileCategory: [(source: String, count: Int, totalSize: Int64)]] = [:]
+        
+        for (category, files) in scannedFiles {
+            var groups: [String: (count: Int, size: Int64)] = [:]
+            for file in files {
+                let source = file.source ?? "Other"
+                var current = groups[source] ?? (0, 0)
+                current.count += 1
+                current.size += file.allocatedSize
+                groups[source] = current
+            }
+            
+            cache[category] = groups.map { (source: $0.key, count: $0.value.count, totalSize: $0.value.size) }
+                .sorted { $0.totalSize > $1.totalSize }
+        }
+        
+        cachedSubCategoryStats = cache
+    }
+    
+    // MARK: - Duplicate Detection (Fix #1 -- runs once, retrieves stored result)
     
     private func detectDuplicates() async {
         scanState = .detectingDuplicates(progress: 0)
         
-        // Collect all scanned files across all categories for duplicate detection
-        // Exclude system junk and cache since duplicates there are expected
         let excludedCategories: Set<FileCategory> = [.cache, .logs, .systemJunk]
         var allFiles: [ScannedFileInfo] = []
         
@@ -482,7 +498,7 @@ final class ScanViewModel {
         
         guard allFiles.count > 1 else { return }
         
-        // Run duplicate detection with progress
+        // Run detection with progress (stores result internally)
         for await progress in await duplicateService.detectDuplicates(from: allFiles) {
             switch progress.phase {
             case .groupingBySize:
@@ -494,23 +510,21 @@ final class ScanViewModel {
             }
         }
         
-        // Get the final results
-        duplicateGroups = await duplicateService.detectDuplicatesSync(from: allFiles)
-        
-        // Update stats for duplicates category
+        // Retrieve stored result (no re-scan!)
+        duplicateGroups = await duplicateService.getLastResult()
         updateDuplicateStats()
         
         if !duplicateGroups.isEmpty {
-            print("Found \(duplicateGroups.count) duplicate groups, \(totalDuplicateCount) duplicate files, \(ByteFormatter.format(duplicateWastedSpace)) wasted")
+            print("Found \(duplicateGroups.count) duplicate groups, \(totalDuplicateCount) duplicates, \(ByteFormatter.format(duplicateWastedSpace)) wasted")
         }
     }
     
     private func updateDuplicateStats() {
         if !duplicateGroups.isEmpty {
-            // Create flat list of duplicate files for the category view
             var duplicateFiles: [ScannedFileInfo] = []
+            duplicateFiles.reserveCapacity(totalDuplicateCount)
+            
             for group in duplicateGroups {
-                // Mark all files except the first as duplicates (first is the "original")
                 for file in group.files.dropFirst() {
                     let dupFile = ScannedFileInfo(
                         url: file.url,
@@ -528,69 +542,60 @@ final class ScanViewModel {
             }
             
             scannedFiles[.duplicates] = duplicateFiles
-            categoryStats[.duplicates] = CategoryStats(
-                count: duplicateFiles.count,
-                totalSize: duplicateWastedSpace
-            )
+            categoryStats[.duplicates] = CategoryStats(count: duplicateFiles.count, totalSize: duplicateWastedSpace)
         } else {
             scannedFiles.removeValue(forKey: .duplicates)
             categoryStats.removeValue(forKey: .duplicates)
         }
     }
     
-    // MARK: - Orphaned App Data Filtering
+    // MARK: - Orphaned App Data Filtering (Fix #13 + #14)
     
-    /// Filter orphaned app data to only include data for apps that are no longer installed
-    private func filterOrphanedAppData() {
-        guard var orphanedFiles = scannedFiles[.orphanedAppData], !orphanedFiles.isEmpty else { return }
+    private func filterOrphanedAppData() async {
+        guard let orphanedFiles = scannedFiles[.orphanedAppData], !orphanedFiles.isEmpty else { return }
         
-        // Get list of installed applications
-        let installedApps = getInstalledAppBundleIdentifiers()
+        // Move I/O-heavy plist reading off main thread
+        let installedApps = await Task.detached {
+            Self.getInstalledAppBundleIdentifiers()
+        }.value
         
-        // Filter to only truly orphaned files
-        let originalCount = orphanedFiles.count
-        let originalSize = orphanedFiles.reduce(Int64(0)) { $0 + $1.allocatedSize }
+        // Pre-compute lowercased set once (Fix #13)
+        let installedAppsLower = Set(installedApps.map { $0.lowercased() })
         
-        orphanedFiles = orphanedFiles.filter { file in
+        let filteredFiles = orphanedFiles.filter { file in
             let pathComponents = file.url.pathComponents
-            // Look for bundle identifier in the path (e.g., com.apple.Safari)
             guard let appSupportIndex = pathComponents.firstIndex(of: "Application Support"),
                   appSupportIndex + 1 < pathComponents.count else {
-                return true // Keep if we can't determine the app
+                return true
             }
             
             let folderName = pathComponents[appSupportIndex + 1]
             
-            // Check if this looks like a bundle identifier or app name
-            // If the corresponding app is installed, this is NOT orphaned
+            // O(1) set lookup instead of O(n) loop
             if installedApps.contains(folderName) {
-                return false // App is installed, not orphaned
+                return false
             }
             
-            // Check if any installed app's bundle ID contains this folder name
             let folderLower = folderName.lowercased()
-            for bundleId in installedApps {
-                if bundleId.lowercased().contains(folderLower) || folderLower.contains(bundleId.lowercased()) {
+            // Check against pre-lowercased set
+            for id in installedAppsLower {
+                if id.contains(folderLower) || folderLower.contains(id) {
                     return false
                 }
             }
             
-            return true // Truly orphaned
+            return true
         }
         
-        // Update the stored data
-        scannedFiles[.orphanedAppData] = orphanedFiles
-        let newSize = orphanedFiles.reduce(Int64(0)) { $0 + $1.allocatedSize }
-        categoryStats[.orphanedAppData] = CategoryStats(count: orphanedFiles.count, totalSize: newSize)
+        scannedFiles[.orphanedAppData] = filteredFiles
+        let newSize = filteredFiles.reduce(Int64(0)) { $0 + $1.allocatedSize }
+        categoryStats[.orphanedAppData] = CategoryStats(count: filteredFiles.count, totalSize: newSize)
         
-        let filtered = originalCount - orphanedFiles.count
-        if filtered > 0 {
-            print("Filtered \(filtered) active app support entries (not orphaned)")
-        }
+        rebuildSubCategoryStatsCache()
     }
     
-    /// Get bundle identifiers and names of all installed applications
-    private func getInstalledAppBundleIdentifiers() -> Set<String> {
+    /// Get bundle identifiers of installed apps -- nonisolated for off-main-thread use
+    private nonisolated static func getInstalledAppBundleIdentifiers() -> Set<String> {
         var identifiers = Set<String>()
         
         let appDirs = [
@@ -607,16 +612,13 @@ final class ScanViewModel {
             
             for item in contents {
                 if item.pathExtension == "app" {
-                    // Add the app name (without .app extension)
                     identifiers.insert(item.deletingPathExtension().lastPathComponent)
                     
-                    // Try to read the bundle identifier from Info.plist
                     let plistURL = item.appendingPathComponent("Contents/Info.plist")
                     if let plistData = try? Data(contentsOf: plistURL),
                        let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any],
                        let bundleId = plist["CFBundleIdentifier"] as? String {
                         identifiers.insert(bundleId)
-                        // Also add the last component of the bundle ID (e.g., "Safari" from "com.apple.Safari")
                         if let lastComponent = bundleId.split(separator: ".").last {
                             identifiers.insert(String(lastComponent))
                         }
@@ -631,27 +633,22 @@ final class ScanViewModel {
     // MARK: - File Removal After Deletion
     
     private func removeDeletedFiles(_ deletedFiles: [ScannedFileInfo], from category: FileCategory) {
-        let deletedURLs = Set(deletedFiles.map { $0.url })
+        let deletedIDs = Set(deletedFiles.map { $0.id })
         
-        // Remove from scanned files
         if var files = scannedFiles[category] {
-            files.removeAll { deletedURLs.contains($0.url) }
+            files.removeAll { deletedIDs.contains($0.id) }
             scannedFiles[category] = files
             
-            // Update stats
             let newSize = files.reduce(Int64(0)) { $0 + $1.allocatedSize }
             categoryStats[category] = CategoryStats(count: files.count, totalSize: newSize)
         }
         
-        // Remove from selected items
         for file in deletedFiles {
-            let id = generateId(for: file)
-            selectedItems.remove(id)
+            selectedItems.remove(file.id)
         }
     }
 }
 
 // MARK: - Full Disk Access Status Alias
 
-/// Alias for compatibility with views that expect FullDiskAccessStatus
 typealias FullDiskAccessStatus = PermissionStatus

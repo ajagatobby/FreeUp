@@ -55,6 +55,9 @@ actor UltraScannerService {
         ".git", ".svn", ".hg", "node_modules", ".npm"
     ]
     
+    /// Cache for UTType lookups by extension (avoids repeated LaunchServices queries)
+    private var utTypeCache: [String: UTType?] = [:]
+    
     private var isCancelled = false
     
     // MARK: - Public API
@@ -241,8 +244,16 @@ actor UltraScannerService {
                 let fileSize = Int64(stat.pointee.st_size)
                 let accessTime = Date(timeIntervalSince1970: TimeInterval(stat.pointee.st_atimespec.tv_sec))
                 
-                // Get content type (this is the expensive part, but necessary for categorization)
-                let contentType = UTType(filenameExtension: fileURL.pathExtension)
+                // Get content type with extension cache (avoids repeated LaunchServices lookups)
+                let ext = fileURL.pathExtension
+                let contentType: UTType?
+                if let cached = utTypeCache[ext] {
+                    contentType = cached
+                } else {
+                    let looked = UTType(filenameExtension: ext)
+                    utTypeCache[ext] = looked
+                    contentType = looked
+                }
                 let category = FileCategory.categorize(contentType: contentType, url: fileURL)
                 
                 let fileInfo = ScannedFileInfo(
@@ -400,8 +411,16 @@ actor UltraScannerService {
                 // Build file URL
                 let fileURL = directory.appendingPathComponent(name)
                 
-                // Get content type from extension
-                let contentType = UTType(filenameExtension: fileURL.pathExtension)
+                // Get content type with extension cache
+                let ext2 = fileURL.pathExtension
+                let contentType: UTType?
+                if let cached = utTypeCache[ext2] {
+                    contentType = cached
+                } else {
+                    let looked = UTType(filenameExtension: ext2)
+                    utTypeCache[ext2] = looked
+                    contentType = looked
+                }
                 let category = FileCategory.categorize(contentType: contentType, url: fileURL)
                 let lastAccess = Date(timeIntervalSince1970: TimeInterval(accessTime.tv_sec))
                 

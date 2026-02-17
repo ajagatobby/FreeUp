@@ -109,11 +109,9 @@ struct FreeUpApp: App {
                 Divider()
                 
                 Button("Select All") {
-                    // Select all files in all categories
-                    for (category, files) in scanViewModel.scannedFiles {
+                    for (_, files) in scanViewModel.scannedFiles {
                         for file in files {
-                            let id = scanViewModel.generateId(for: file)
-                            scanViewModel.selectedItems.insert(id)
+                            scanViewModel.selectedItems.insert(file.id)
                         }
                     }
                 }

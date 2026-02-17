@@ -97,19 +97,21 @@ struct CategoryDetailView: View {
         }
     }
     
-    private var selectedCount: Int {
-        files.filter { file in
-            let id = viewModel.generateId(for: file)
-            return viewModel.selectedItems.contains(id)
-        }.count
+    /// Combined selected count and size (single pass instead of two)
+    private var selectedInfo: (count: Int, size: Int64) {
+        var count = 0
+        var size: Int64 = 0
+        for file in files {
+            if viewModel.selectedItems.contains(file.id) {
+                count += 1
+                size += file.allocatedSize
+            }
+        }
+        return (count, size)
     }
     
-    private var selectedSize: Int64 {
-        files.filter { file in
-            let id = viewModel.generateId(for: file)
-            return viewModel.selectedItems.contains(id)
-        }.reduce(0) { $0 + $1.allocatedSize }
-    }
+    private var selectedCount: Int { selectedInfo.count }
+    private var selectedSize: Int64 { selectedInfo.size }
     
     private var categoryColor: Color { category.color }
     
@@ -162,8 +164,7 @@ struct CategoryDetailView: View {
                                 },
                                 onSelectAll: {
                                     for file in group.files {
-                                        let id = viewModel.generateId(for: file)
-                                        viewModel.selectedItems.insert(id)
+                                        viewModel.selectedItems.insert(file.id)
                                     }
                                 }
                             )
@@ -275,8 +276,7 @@ struct CategoryDetailView: View {
     
     @ViewBuilder
     private func fileRow(for file: ScannedFileInfo) -> some View {
-        let id = viewModel.generateId(for: file)
-        let isSelected = viewModel.selectedItems.contains(id)
+        let isSelected = viewModel.selectedItems.contains(file.id)
         let isClone = file.fileContentIdentifier != nil
         
         FileRowView(
@@ -284,10 +284,10 @@ struct CategoryDetailView: View {
             isSelected: isSelected,
             isClone: isClone,
             onToggleSelection: {
-                if viewModel.selectedItems.contains(id) {
-                    viewModel.selectedItems.remove(id)
+                if viewModel.selectedItems.contains(file.id) {
+                    viewModel.selectedItems.remove(file.id)
                 } else {
-                    viewModel.selectedItems.insert(id)
+                    viewModel.selectedItems.insert(file.id)
                     if isClone {
                         showCloneWarning = true
                     }
