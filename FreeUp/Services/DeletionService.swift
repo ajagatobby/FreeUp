@@ -57,7 +57,9 @@ actor DeletionService {
         isCancelled = false
     }
     
-    /// Fast batch deletion — runs file I/O in parallel chunks off the actor
+    /// Fast batch deletion
+    /// - Move to Trash: uses NSWorkspace.recycle (goes through Finder, has proper permissions)
+    /// - Permanent: uses parallel FileManager.removeItem (fast but needs FDA for protected dirs)
     func deleteFilesFast(
         _ files: [ScannedFileInfo],
         mode: DeleteMode = .moveToTrash
@@ -68,43 +70,66 @@ actor DeletionService {
         
         isCancelled = false
         
-        // For large batches (>1000), always use parallel removeItem regardless of mode.
-        // NSWorkspace.recycle involves IPC with Finder per-chunk and is far too slow
-        // for thousands of files. For small batches, respect the user's Trash preference.
-        if files.count > 1000 || mode == .permanent {
+        switch mode {
+        case .moveToTrash:
+            // ALWAYS use NSWorkspace.recycle for Trash — it goes through Finder
+            // which has broader permissions than direct FileManager calls.
+            // Process concurrent chunks for speed.
+            return await trashFilesConcurrent(files)
+        case .permanent:
             return await deleteFilesBatchParallel(files)
-        } else {
-            return await trashFilesBatch(files)
         }
     }
     
-    // MARK: - Batch Trash via NSWorkspace.recycle (fast — Finder batches internally)
+    // MARK: - Batch Trash via NSWorkspace.recycle (concurrent chunks)
     
-    /// Use NSWorkspace.recycle to trash files in one Finder call
-    private func trashFilesBatch(_ files: [ScannedFileInfo]) async -> DeletionResult {
-        let urls = files.map(\.url)
+    /// Trash files using NSWorkspace.recycle with concurrent chunk processing
+    private func trashFilesConcurrent(_ files: [ScannedFileInfo]) async -> DeletionResult {
+        // Process in concurrent chunks — Finder handles the actual Trash move
+        // Chunk size of 200 balances Finder IPC overhead vs responsiveness
+        let chunkSize = 200
+        let chunks = stride(from: 0, to: files.count, by: chunkSize).map { start in
+            let end = min(start + chunkSize, files.count)
+            return Array(files[start..<end])
+        }
         
-        // NSWorkspace.recycle handles batching internally and is MUCH faster than
-        // individual trashItem calls for large numbers of files
-        // Process in chunks of 500 to avoid overwhelming Finder and to allow cancellation
-        let chunkSize = 500
+        // Run up to 4 chunks concurrently
         var totalSuccess = 0
         var totalFailure = 0
         var totalFreed: Int64 = 0
         var allErrors: [DeletionError] = []
         
-        for chunkStart in stride(from: 0, to: urls.count, by: chunkSize) {
-            if isCancelled { break }
+        await withTaskGroup(of: DeletionResult.self) { group in
+            var launched = 0
+            let maxConcurrentChunks = 4
             
-            let chunkEnd = min(chunkStart + chunkSize, urls.count)
-            let chunkURLs = Array(urls[chunkStart..<chunkEnd])
-            let chunkFiles = Array(files[chunkStart..<chunkEnd])
+            for chunk in chunks {
+                if isCancelled { break }
+                
+                if launched >= maxConcurrentChunks {
+                    if let result = await group.next() {
+                        totalSuccess += result.successCount
+                        totalFailure += result.failureCount
+                        totalFreed += result.freedSpace
+                        allErrors.append(contentsOf: result.errors)
+                    }
+                }
+                
+                let chunkURLs = chunk.map(\.url)
+                let chunkFiles = chunk
+                group.addTask {
+                    await self.recycleChunk(chunkURLs, files: chunkFiles)
+                }
+                launched += 1
+            }
             
-            let result = await recycleChunk(chunkURLs, files: chunkFiles)
-            totalSuccess += result.successCount
-            totalFailure += result.failureCount
-            totalFreed += result.freedSpace
-            allErrors.append(contentsOf: result.errors)
+            // Drain remaining
+            for await result in group {
+                totalSuccess += result.successCount
+                totalFailure += result.failureCount
+                totalFreed += result.freedSpace
+                allErrors.append(contentsOf: result.errors)
+            }
         }
         
         return DeletionResult(
@@ -134,7 +159,7 @@ actor DeletionService {
                     } else {
                         errors.append(DeletionError(
                             url: file.url,
-                            error: error?.localizedDescription ?? "Failed to move to Trash"
+                            error: error?.localizedDescription ?? "Permission denied — grant Full Disk Access in System Settings"
                         ))
                     }
                 }
@@ -166,7 +191,6 @@ actor DeletionService {
             for file in files {
                 if isCancelled { break }
                 
-                // Limit concurrency
                 if submitted >= maxConcurrency {
                     if let result = await group.next() {
                         if result.0 {
@@ -194,7 +218,6 @@ actor DeletionService {
                 submitted += 1
             }
             
-            // Drain remaining
             for await result in group {
                 if result.0 {
                     successCount += 1

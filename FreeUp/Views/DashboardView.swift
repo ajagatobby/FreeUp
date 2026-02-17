@@ -252,14 +252,29 @@ struct DashboardView: View {
             } message: {
                 Text("This will \(viewModel.currentDeleteMode == .moveToTrash ? "move to Trash" : "permanently delete") cache files, logs, and system junk to free up \(ByteFormatter.format(viewModel.reclaimableSpace)). Continue?")
             }
-            .alert("Cleanup Complete", isPresented: Binding(
-                get: { viewModel.showDeletionResult },
-                set: { if !$0 { viewModel.dismissDeletionResult() } }
-            )) {
+            .alert(
+                viewModel.lastDeletionResult?.allSuccessful == true ? "Cleanup Complete" : "Cleanup Result",
+                isPresented: Binding(
+                    get: { viewModel.showDeletionResult },
+                    set: { if !$0 { viewModel.dismissDeletionResult() } }
+                )
+            ) {
                 Button("OK") { viewModel.dismissDeletionResult() }
+                if viewModel.lastDeletionResult?.failureCount ?? 0 > 0 && viewModel.lastDeletionResult?.successCount == 0 {
+                    Button("Open Privacy Settings") {
+                        viewModel.openFullDiskAccessSettings()
+                        viewModel.dismissDeletionResult()
+                    }
+                }
             } message: {
                 if let result = viewModel.lastDeletionResult {
-                    Text("Freed \(ByteFormatter.format(result.freedSpace)). \(result.successCount) files removed\(result.failureCount > 0 ? ", \(result.failureCount) failed" : "").")
+                    if result.successCount > 0 && result.failureCount == 0 {
+                        Text("Freed \(ByteFormatter.format(result.freedSpace)). \(result.successCount) files removed.")
+                    } else if result.successCount == 0 && result.failureCount > 0 {
+                        Text("All \(result.failureCount) files failed to delete. Grant Full Disk Access in System Settings > Privacy & Security to allow FreeUp to remove protected files.")
+                    } else {
+                        Text("Freed \(ByteFormatter.format(result.freedSpace)). \(result.successCount) removed, \(result.failureCount) failed (may need Full Disk Access).")
+                    }
                 }
             }
             .sheet(isPresented: $showingPermissionsSheet) {
