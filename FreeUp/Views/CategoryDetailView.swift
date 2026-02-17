@@ -152,7 +152,7 @@ struct CategoryDetailView: View {
         } message: {
             Text("This file appears to be an APFS clone. Deleting it may not free disk space if other files share the same data blocks.")
         }
-        .task(id: SortSearchKey(sort: sortOrder, search: searchText)) {
+        .task(id: SortSearchKey(sort: sortOrder, search: searchText, fileCount: viewModel.files(for: category).count)) {
             await rebuildDisplayData()
         }
     }
@@ -461,6 +461,7 @@ struct CategoryDetailView: View {
 private struct SortSearchKey: Equatable {
     let sort: SortOrder
     let search: String
+    let fileCount: Int
 }
 
 // MARK: - Sort Order

@@ -269,7 +269,10 @@ final class ScanViewModel {
         let result = await deletionService.deleteFilesFast(selectedFiles, mode: currentDeleteMode)
         
         if result.successCount > 0 {
-            removeDeletedFilesFast(result.successCount == selectedFiles.count ? selectedFiles : Array(selectedFiles.prefix(result.successCount)), fromCategories: [category])
+            // Use failed URLs to determine which files actually succeeded
+            let failedURLs = Set(result.errors.map(\.url))
+            let successfulFiles = selectedFiles.filter { !failedURLs.contains($0.url) }
+            removeDeletedFilesFast(successfulFiles, fromCategories: [category])
         }
         
         lastDeletionResult = result
