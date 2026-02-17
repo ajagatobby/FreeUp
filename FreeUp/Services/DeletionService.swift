@@ -70,7 +70,11 @@ actor DeletionService {
         mode: DeleteMode = .moveToTrash
     ) -> AsyncStream<DeletionProgress> {
         AsyncStream { continuation in
-            Task {
+            Task { [weak self] in
+                guard let self else {
+                    continuation.finish()
+                    return
+                }
                 await self.resetCancellation()
                 await self.performDeletion(files: files, mode: mode, continuation: continuation)
             }

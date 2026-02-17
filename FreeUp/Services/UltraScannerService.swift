@@ -146,7 +146,7 @@ actor UltraScannerService {
                 totalFiles += count
                 totalSize += size
                 
-                if await self.isCancelled {
+                if self.isCancelled {
                     continuation.yield(.error(.cancelled))
                     continuation.finish()
                     return
