@@ -31,11 +31,10 @@ struct SidebarCategoryRow: View {
 
                 Spacer(minLength: 2)
 
-                if let stats, stats.totalSize > 0 {
-                    Text(ByteFormatter.format(stats.totalSize))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
-                }
+                Text(stats != nil && stats!.totalSize > 0 ? ByteFormatter.format(stats!.totalSize) : "")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                    .contentTransition(.identity)
             }
             .padding(.vertical, 5)
             .padding(.horizontal, 8)

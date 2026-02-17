@@ -127,6 +127,8 @@ struct DashboardView: View {
             }
         }
         .listStyle(.sidebar)
+        .animation(nil, value: sortedCategories.map(\.rawValue))
+        .animation(nil, value: isScanning)
         .safeAreaInset(edge: .top) {
             sidebarHeader
         }
